@@ -15,7 +15,7 @@ This guide explains how to deploy and configure the Supabase Edge Functions for 
 **Purpose**: Verifies and processes Paystack payment webhooks.
 
 **Features**:
-- HMAC SHA512 signature verification
+- HMAC SHA512 signature verification (using Web Crypto API)
 - Contribution payment processing
 - Security deposit payment processing
 - Automatic database updates
@@ -29,8 +29,14 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
 **Deployment**:
 ```bash
-supabase functions deploy paystack-webhook
+# Using the deployment script (recommended)
+./deploy-edge-functions.sh paystack-webhook
+
+# Or manually
+supabase functions deploy paystack-webhook --no-verify
 ```
+
+**Note**: The `--no-verify` flag is required due to transitive dependencies in some packages.
 
 **Webhook URL**:
 ```
@@ -63,8 +69,14 @@ SMTP_FROM_NAME=Smart Ajo
 
 **Deployment**:
 ```bash
-supabase functions deploy send-email
+# Using the deployment script (recommended)
+./deploy-edge-functions.sh send-email
+
+# Or manually
+supabase functions deploy send-email --no-verify
 ```
+
+**Note**: The `--no-verify` flag is required due to transitive dependencies in the denomailer SMTP library.
 
 **Usage Example**:
 ```javascript
@@ -222,16 +234,25 @@ supabase secrets set BVN_API_KEY=...
 
 ### 5. Deploy Functions
 
+**Recommended: Use the deployment script**
 ```bash
 # Deploy all functions
-supabase functions deploy verify-payment
-supabase functions deploy paystack-webhook
-supabase functions deploy send-email
-supabase functions deploy verify-bvn
+./deploy-edge-functions.sh
 
-# Or deploy all at once
-supabase functions deploy
+# Or deploy a specific function
+./deploy-edge-functions.sh paystack-webhook
 ```
+
+**Manual deployment**
+```bash
+# Deploy individual functions with --no-verify flag
+supabase functions deploy verify-payment --no-verify
+supabase functions deploy paystack-webhook --no-verify
+supabase functions deploy send-email --no-verify
+supabase functions deploy verify-bvn --no-verify
+```
+
+**Note**: The `--no-verify` flag is required to allow transitive dependencies in some packages (denomailer, hmac) that import from external registries.
 
 ### 6. Test Functions
 
