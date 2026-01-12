@@ -426,17 +426,14 @@ serve(async (req) => {
       );
     }
 
-    // Create a Supabase client with the auth header to verify user
-    const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, {
-      global: {
-        headers: {
-          Authorization: authHeader,
-        },
-      },
-    });
+    // Create a Supabase client with service role for auth verification
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify the user is authenticated
-    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+    // Extract JWT token from Authorization header
+    const jwt = authHeader.replace('Bearer ', '');
+    
+    // Verify the JWT token is valid
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
     
     if (authError || !user) {
       console.error('Authentication failed:', authError?.message || 'No user found');
@@ -534,10 +531,7 @@ serve(async (req) => {
     console.log('Payment status:', verificationResponse.data.status);
     console.log('Payment amount:', verificationResponse.data.amount);
 
-    // Use service role client for database operations
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Step 2: Store payment record
+    // Step 2: Store payment record (using supabase client created earlier)
     console.log('Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
     console.log('Store result:', storeResult);
