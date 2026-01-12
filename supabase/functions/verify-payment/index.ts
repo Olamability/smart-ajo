@@ -84,23 +84,56 @@ async function verifyWithPaystack(
   reference: string,
   secretKey: string
 ): Promise<PaystackVerificationResponse> {
-  const response = await fetch(
-    `https://api.paystack.co/transaction/verify/${reference}`,
-    {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json',
-      },
+  console.log(`Verifying payment with Paystack: ${reference}`);
+  
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  
+  try {
+    const response = await fetch(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      }
+    );
+
+    clearTimeout(timeoutId);
+    console.log(`Paystack API response status: ${response.status}`);
+
+    if (!response.ok) {
+      let errorMessage = 'Paystack verification failed';
+      try {
+        const error = await response.json();
+        errorMessage = error.message || errorMessage;
+        console.error('Paystack API error:', error);
+      } catch (e) {
+        const text = await response.text();
+        console.error('Paystack API error (non-JSON):', text);
+        errorMessage = `HTTP ${response.status}: ${text || errorMessage}`;
+      }
+      throw new Error(errorMessage);
     }
-  );
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Paystack verification failed');
+    const result = await response.json();
+    console.log(`Paystack verification result - status: ${result.status}, data.status: ${result.data?.status}`);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    // Handle abort/timeout
+    if (error.name === 'AbortError') {
+      console.error('Paystack API request timed out after 30 seconds');
+      throw new Error('Payment verification timed out. Please try again.');
+    }
+    
+    throw error;
   }
-
-  return await response.json();
 }
 
 /**
@@ -388,7 +421,9 @@ serve(async (req) => {
       );
     }
 
-    console.log('Verifying payment:', reference);
+    console.log('===== PAYMENT VERIFICATION START =====');
+    console.log('Reference:', reference);
+    console.log('Timestamp:', new Date().toISOString());
 
     // Step 1: Verify with Paystack
     let verificationResponse: PaystackVerificationResponse;
@@ -396,8 +431,17 @@ serve(async (req) => {
       verificationResponse = await verifyWithPaystack(reference, paystackSecret);
     } catch (error) {
       console.error('Paystack verification failed:', error);
+      console.error('Error type:', error.constructor.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      
       return new Response(
         JSON.stringify({
+          success: false,
+          payment_status: 'verification_failed',
+          verified: false,
+          amount: 0,
+          message: 'Payment verification failed with Paystack',
           error: 'Payment verification failed',
           details: error.message,
         }),
@@ -409,10 +453,15 @@ serve(async (req) => {
     }
 
     if (!verificationResponse.status || !verificationResponse.data) {
+      console.error('Invalid Paystack response:', JSON.stringify(verificationResponse));
       return new Response(
         JSON.stringify({
+          success: false,
+          payment_status: 'invalid_response',
+          verified: false,
+          amount: 0,
+          message: verificationResponse.message || 'Invalid response from payment gateway',
           error: 'Invalid response from payment gateway',
-          message: verificationResponse.message,
         }),
         {
           status: 400,
@@ -421,18 +470,56 @@ serve(async (req) => {
       );
     }
 
+    console.log('Paystack verification successful');
+    console.log('Payment status:', verificationResponse.data.status);
+    console.log('Payment amount:', verificationResponse.data.amount);
+
     // Initialize Supabase client with service role
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Supabase configuration missing');
+      return new Response(
+        JSON.stringify({
+          success: false,
+          payment_status: verificationResponse.data.status,
+          verified: false,
+          amount: 0,
+          message: 'Server configuration error',
+          error: 'Server configuration error',
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Step 2: Store payment record
+    console.log('Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
+    console.log('Store result:', storeResult);
+    
     if (!storeResult.success) {
+      console.error('Failed to store payment record:', storeResult.message);
       return new Response(
         JSON.stringify({
-          error: storeResult.message,
+          success: false,
           payment_status: verificationResponse.data.status,
+          verified: verificationResponse.data.status === 'success',
+          amount: verificationResponse.data.amount,
+          message: storeResult.message,
+          error: storeResult.message,
+          data: {
+            reference: verificationResponse.data.reference,
+            amount: verificationResponse.data.amount,
+            currency: verificationResponse.data.currency,
+            channel: verificationResponse.data.channel,
+            paid_at: verificationResponse.data.paid_at,
+          },
         }),
         {
           status: 500,
@@ -445,8 +532,14 @@ serve(async (req) => {
     let businessLogicResult = { success: true, message: 'No business logic needed' };
     
     if (verificationResponse.data.status === 'success') {
+      console.log('Executing business logic...');
       businessLogicResult = await executeBusinessLogic(supabase, verificationResponse.data);
+      console.log('Business logic result:', businessLogicResult);
+    } else {
+      console.log('Payment not successful, skipping business logic. Status:', verificationResponse.data.status);
     }
+
+    console.log('===== PAYMENT VERIFICATION END =====');
 
     // Return combined result
     return new Response(
@@ -470,9 +563,19 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Verification error:', error);
+    console.error('===== VERIFICATION ERROR =====');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('===== END ERROR =====');
+    
     return new Response(
       JSON.stringify({
+        success: false,
+        payment_status: 'error',
+        verified: false,
+        amount: 0,
+        message: 'Internal server error during verification',
         error: 'Internal server error',
         details: error.message,
       }),

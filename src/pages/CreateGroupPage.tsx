@@ -196,12 +196,18 @@ export default function CreateGroupPage() {
             paymentCallbackExecutedRef.current = true; // Mark callback as executed
             // Payment successful, verify on backend
             if (response.status === 'success') {
-              toast.info('Payment received! Verifying...');
+              toast.info('Payment received! Verifying with backend...', {
+                duration: 5000,
+              });
               
-              // Verify payment with backend
+              // Verify payment with backend (with retry logic)
               const verifyResult = await verifyPayment(response.reference);
               
+              console.log('Verification result:', verifyResult);
+              
               if (verifyResult.verified) {
+                toast.success('Payment verified! Processing your membership...');
+                
                 // Process payment and add creator as member with selected slot
                 const processResult = await processGroupCreationPayment(
                   response.reference,
@@ -215,16 +221,34 @@ export default function CreateGroupPage() {
                   // Navigate to group detail page
                   navigate(`/groups/${createdGroup.id}`);
                 } else {
-                  toast.error(processResult.error || 'Failed to process payment');
-                  // Delete group since payment processing failed
-                  await handleGroupCleanup(createdGroup.id, 'Payment processing failed');
+                  console.error('Payment processing failed:', processResult.error);
+                  toast.error(
+                    processResult.error || 'Failed to process payment. Please contact support with reference: ' + response.reference
+                  );
+                  // IMPORTANT: Don't delete group - payment was successful but processing failed
+                  // Support can manually complete the membership
                   setShowPaymentDialog(false);
                   navigate('/groups');
                 }
               } else {
-                toast.error('Payment verification failed. Please contact support.');
-                // Delete group since payment verification failed
-                await handleGroupCleanup(createdGroup.id, 'Payment verification failed');
+                console.error('Payment verification failed:', verifyResult);
+                
+                // Provide detailed error message based on verification result
+                let errorMessage = 'Payment verification failed.';
+                if (verifyResult.payment_status === 'verification_failed') {
+                  errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
+                } else if (verifyResult.payment_status === 'failed') {
+                  errorMessage = 'Payment was declined by your bank. Please try again.';
+                } else if (verifyResult.error) {
+                  errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
+                } else {
+                  errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
+                }
+                
+                toast.error(errorMessage, { duration: 10000 });
+                
+                // IMPORTANT: Don't delete group if verification failed but payment might have succeeded
+                // The webhook might still process it, or support can verify manually
                 setShowPaymentDialog(false);
                 navigate('/groups');
               }
@@ -237,10 +261,15 @@ export default function CreateGroupPage() {
             }
           } catch (error) {
             console.error('Error in payment callback:', error);
-            toast.error('An error occurred while processing your payment. Please contact support with reference: ' + response.reference);
+            toast.error(
+              'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
+              { duration: 10000 }
+            );
             // IMPORTANT: Group is NOT deleted here because payment may have succeeded in Paystack
             // Support team can verify payment status and manually process if needed
             // Alternative: Mark group as 'pending_verification' status for admin review
+            setShowPaymentDialog(false);
+            navigate('/groups');
           } finally {
             setIsProcessingPayment(false);
           }

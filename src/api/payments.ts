@@ -140,46 +140,134 @@ export const initializeGroupJoinPayment = async (
 };
 
 /**
- * Verify payment with backend
+ * Verify payment with backend (with retry logic)
  * 
  * MANDATORY: All payments MUST be verified via backend before being
  * considered successful. Frontend callback does NOT equal payment success.
+ * 
+ * Implements retry logic to handle cases where Paystack transaction
+ * might need a moment to be fully settled after the success callback.
  */
 export const verifyPayment = async (
-  reference: string
+  reference: string,
+  retries: number = 3,
+  delayMs: number = 2000
 ): Promise<VerifyPaymentResponse> => {
-  try {
-    const supabase = createClient();
+  let lastError: string = '';
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`Verifying payment with reference: ${reference} (attempt ${attempt}/${retries})`);
+      const supabase = createClient();
 
-    // Call the verify-payment Edge Function
-    const { data, error } = await supabase.functions.invoke('verify-payment', {
-      body: { reference },
-    });
+      // Add a small delay before first retry (not on first attempt)
+      if (attempt > 1) {
+        console.log(`Waiting ${delayMs}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
 
-    if (error) {
-      console.error('Payment verification error:', error);
-      return {
-        success: false,
-        payment_status: 'unknown',
-        verified: false,
-        amount: 0,
-        message: 'Failed to verify payment',
-        error: error.message,
-      };
+      // Call the verify-payment Edge Function
+      const { data, error } = await supabase.functions.invoke('verify-payment', {
+        body: { reference },
+      });
+
+      console.log('Edge Function response:', { data, error });
+
+      if (error) {
+        console.error('Payment verification error:', error);
+        lastError = error.message;
+        
+        // If it's a network error or timeout, retry
+        if (attempt < retries && (
+          error.message.includes('timeout') || 
+          error.message.includes('network') ||
+          error.message.includes('fetch')
+        )) {
+          console.log('Retrying due to network error...');
+          continue;
+        }
+        
+        return {
+          success: false,
+          payment_status: 'unknown',
+          verified: false,
+          amount: 0,
+          message: 'Failed to verify payment',
+          error: error.message,
+        };
+      }
+
+      // Handle case where data is null or undefined
+      if (!data) {
+        console.error('No data returned from verification');
+        lastError = 'No response from verification service';
+        
+        if (attempt < retries) {
+          console.log('Retrying due to empty response...');
+          continue;
+        }
+        
+        return {
+          success: false,
+          payment_status: 'unknown',
+          verified: false,
+          amount: 0,
+          message: 'No response from verification service',
+          error: 'No response from verification service',
+        };
+      }
+
+      // Check if the response has an error field (API-level error)
+      if (data.error) {
+        console.error('API returned error:', data.error, data.details);
+        lastError = data.error;
+        
+        // Retry if payment is still being processed
+        if (attempt < retries && (
+          data.payment_status === 'processing' || 
+          data.payment_status === 'pending' ||
+          data.details?.includes('not found') ||
+          data.details?.includes('pending')
+        )) {
+          console.log('Retrying due to payment still processing...');
+          continue;
+        }
+        
+        return {
+          success: false,
+          payment_status: data.payment_status || 'unknown',
+          verified: false,
+          amount: data.amount || 0,
+          message: data.message || 'Payment verification failed',
+          error: data.error,
+        };
+      }
+
+      // Return successful verification
+      console.log('Payment verification successful:', data);
+      return data;
+    } catch (error) {
+      console.error(`Verify payment error (attempt ${attempt}):`, error);
+      lastError = getErrorMessage(error, 'Failed to verify payment');
+      
+      // Retry on exception
+      if (attempt < retries) {
+        console.log('Retrying due to exception...');
+        continue;
+      }
     }
-
-    return data;
-  } catch (error) {
-    console.error('Verify payment error:', error);
-    return {
-      success: false,
-      payment_status: 'unknown',
-      verified: false,
-      amount: 0,
-      message: 'Failed to verify payment',
-      error: getErrorMessage(error, 'Failed to verify payment'),
-    };
   }
+  
+  // All retries exhausted
+  console.error('All verification attempts failed. Last error:', lastError);
+  return {
+    success: false,
+    payment_status: 'unknown',
+    verified: false,
+    amount: 0,
+    message: `Failed to verify payment after ${retries} attempts`,
+    error: lastError || 'Verification failed',
+  };
 };
 
 /**
