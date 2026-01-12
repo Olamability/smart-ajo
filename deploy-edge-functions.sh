@@ -12,7 +12,7 @@
 #   ./deploy-edge-functions.sh                 # Deploy all functions
 #   ./deploy-edge-functions.sh verify-payment  # Deploy specific function
 
-set -e  # Exit on error
+set -euo pipefail  # Exit on error, undefined vars, and pipe failures
 
 # Colors for output
 GREEN='\033[0;32m'

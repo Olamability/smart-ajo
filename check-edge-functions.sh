@@ -3,7 +3,7 @@
 # Edge Functions Health Check Script
 # Tests if Edge Functions are deployed and responding correctly
 
-set -e
+set -euo pipefail  # Exit on error, undefined vars, and pipe failures
 
 # Colors
 GREEN='\033[0;32m'
@@ -12,13 +12,15 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Configuration
-PROJECT_URL="https://kvxokszuonvdvsazoktc.supabase.co"
-ORIGIN="https://smart-ajo.vercel.app"
+# Configuration (can be overridden via environment variables)
+PROJECT_URL="${SUPABASE_PROJECT_URL:-https://kvxokszuonvdvsazoktc.supabase.co}"
+ORIGIN="${APP_ORIGIN:-https://smart-ajo.vercel.app}"
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Edge Functions Health Check${NC}"
 echo -e "${BLUE}========================================${NC}"
+echo -e "${YELLOW}Project URL: $PROJECT_URL${NC}"
+echo -e "${YELLOW}Origin: $ORIGIN${NC}"
 echo ""
 
 # Function to test CORS preflight
