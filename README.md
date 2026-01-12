@@ -57,6 +57,7 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 
 - **[Environment Setup Guide](./ENVIRONMENT_SETUP.md)** - Detailed environment configuration and troubleshooting
 - **[Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)** - **Step-by-step guide for deploying to Vercel**
+- **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - **Fix CORS errors with Edge Functions**
 - **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
 - **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup
 - **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
@@ -108,6 +109,22 @@ This error occurs when the Paystack public key is not properly set in your envir
 3. Redeploy your application
 
 **See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for complete Vercel setup instructions.**
+
+### CORS Error with Edge Functions
+
+If you see errors like "blocked by CORS policy" when calling Edge Functions:
+
+```
+Access to fetch at 'https://...supabase.co/functions/v1/verify-payment' 
+has been blocked by CORS policy
+```
+
+**Solution:**
+1. Ensure Edge Functions are deployed to Supabase (`supabase functions deploy verify-payment`)
+2. Configure PAYSTACK_SECRET_KEY in Supabase secrets
+3. Clear browser cache and test again
+
+**See [EDGE_FUNCTIONS_CORS_FIX.md](./EDGE_FUNCTIONS_CORS_FIX.md) for complete CORS fix guide.**
 
 ### Page Refresh Returns 404
 
