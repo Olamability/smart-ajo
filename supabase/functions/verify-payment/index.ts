@@ -395,6 +395,65 @@ serve(async (req) => {
   }
 
   try {
+    // Verify authentication - extract JWT token
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      console.error('Missing authorization header');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Unauthorized',
+          message: 'Authentication required. Please ensure you are logged in.',
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Get Supabase configuration
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Supabase configuration missing');
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error' }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Create a Supabase client with the auth header to verify user
+    const supabaseAuth = createClient(supabaseUrl, supabaseServiceKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    // Verify the user is authenticated
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Authentication failed:', authError?.message || 'No user found');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Unauthorized',
+          message: 'Invalid or expired authentication token. Please log in again.',
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    console.log(`Request from authenticated user: ${user.id}`);
+
     // Get Paystack secret key
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!paystackSecret) {
@@ -475,28 +534,7 @@ serve(async (req) => {
     console.log('Payment status:', verificationResponse.data.status);
     console.log('Payment amount:', verificationResponse.data.amount);
 
-    // Initialize Supabase client with service role
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    
-    if (!supabaseUrl || !supabaseServiceKey) {
-      console.error('Supabase configuration missing');
-      return new Response(
-        JSON.stringify({
-          success: false,
-          payment_status: verificationResponse.data.status,
-          verified: false,
-          amount: 0,
-          message: 'Server configuration error',
-          error: 'Server configuration error',
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-    
+    // Use service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Step 2: Store payment record
