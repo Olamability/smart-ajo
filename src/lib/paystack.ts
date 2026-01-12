@@ -99,8 +99,11 @@ class PaystackService {
    * Initialize a payment
    */
   async initializePayment(data: PaystackPaymentData): Promise<void> {
-    if (!this.config.publicKey) {
-      throw new Error('Paystack public key not configured');
+    if (!this.config.publicKey || this.config.publicKey === 'pk_test_your_paystack_public_key_here') {
+      throw new Error(
+        'Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your .env file. ' +
+        'See ENVIRONMENT_SETUP.md for detailed setup instructions.'
+      );
     }
 
     // Ensure script is loaded
