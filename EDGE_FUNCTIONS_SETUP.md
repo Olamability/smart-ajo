@@ -92,7 +92,43 @@ const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
 });
 ```
 
-### 3. BVN Verification (`verify-bvn`)
+### 3. Payment Verification (`verify-payment`)
+
+**Purpose**: Verifies payments with Paystack and updates the database.
+
+**Features**:
+- Verifies payment with Paystack API using secret key
+- Updates payment records in database
+- Processes contribution and security deposit payments
+- Idempotent (safe to call multiple times)
+- CORS enabled for frontend access
+
+**Environment Variables**:
+```bash
+PAYSTACK_SECRET_KEY=sk_test_your_secret_key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+**Deployment**:
+```bash
+supabase functions deploy verify-payment
+```
+
+**Usage Example** (from frontend):
+```javascript
+const response = await supabase.functions.invoke('verify-payment', {
+  body: { reference: 'payment_reference' }
+});
+```
+
+**CORS Configuration**:
+The function includes proper CORS headers to allow frontend access:
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Headers: authorization, x-client-info, apikey, content-type`
+- `Access-Control-Allow-Methods: POST, OPTIONS`
+
+### 4. BVN Verification (`verify-bvn`)
 
 **Purpose**: Verifies user identity using Bank Verification Number (BVN).
 
@@ -188,6 +224,7 @@ supabase secrets set BVN_API_KEY=...
 
 ```bash
 # Deploy all functions
+supabase functions deploy verify-payment
 supabase functions deploy paystack-webhook
 supabase functions deploy send-email
 supabase functions deploy verify-bvn
