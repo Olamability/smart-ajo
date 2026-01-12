@@ -1,0 +1,313 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 60 20% 99%;
+    --foreground: 160 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 160 30% 10%;
+
+    --primary: 158 64% 32%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 160 20% 95%;
+    --secondary-foreground: 160 30% 10%;
+
+    --muted: 160 10% 94%;
+    --muted-foreground: 160 10% 45%;
+
+    --accent: 35 92% 55%;
+    --accent-foreground: 35 92% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 160 15% 90%;
+    --input: 160 15% 90%;
+    --ring: 158 64% 32%;
+
+    --radius: 0.75rem;
+
+    /* Custom tokens */
+    --emerald-glow: 158 64% 32%;
+    --amber-warm: 35 92% 55%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --gradient-hero: linear-gradient(
+      135deg,
+      hsl(158 64% 32%) 0%,
+      hsl(158 50% 25%) 100%
+    );
+    --gradient-card: linear-gradient(
+      180deg,
+      hsl(0 0% 100%) 0%,
+      hsl(160 20% 98%) 100%
+    );
+    --gradient-accent: linear-gradient(
+      135deg,
+      hsl(35 92% 55%) 0%,
+      hsl(25 95% 50%) 100%
+    );
+
+    --shadow-soft: 0 2px 8px -2px hsl(160 30% 10% / 0.08);
+    --shadow-medium: 0 8px 24px -8px hsl(160 30% 10% / 0.12);
+    --shadow-strong: 0 16px 48px -12px hsl(160 30% 10% / 0.18);
+    --shadow-glow: 0 0 40px hsl(158 64% 32% / 0.2);
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+    
+    /* Paystack z-index values - max safe integer to ensure it's always on top */
+    --z-index-paystack-modal: 2147483647;
+    --z-index-paystack-overlay: 2147483646;
+  }
+
+  .dark {
+    --background: 160 30% 6%;
+    --foreground: 60 10% 95%;
+
+    --card: 160 25% 10%;
+    --card-foreground: 60 10% 95%;
+
+    --popover: 160 25% 10%;
+    --popover-foreground: 60 10% 95%;
+
+    --primary: 158 64% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 160 20% 15%;
+    --secondary-foreground: 60 10% 95%;
+
+    --muted: 160 15% 18%;
+    --muted-foreground: 160 10% 60%;
+
+    --accent: 35 92% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 160 15% 20%;
+    --input: 160 15% 20%;
+    --ring: 158 64% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    /* Prevent text cursor on non-editable elements */
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+
+  /* Allow text selection and cursor for input elements */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  /* Allow text selection for readable content */
+  p,
+  span,
+  li,
+  td,
+  th,
+  pre,
+  code {
+    cursor: default; /* Keep default cursor, not text cursor */
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-bold tracking-tight;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-hero);
+  }
+
+  .bg-gradient-hero {
+    background: var(--gradient-hero);
+  }
+
+  .bg-gradient-card {
+    background: var(--gradient-card);
+  }
+
+  .bg-gradient-accent {
+    background: var(--gradient-accent);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+
+  .shadow-medium {
+    box-shadow: var(--shadow-medium);
+  }
+
+  .shadow-strong {
+    box-shadow: var(--shadow-strong);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-fade-up {
+    animation: fadeUp 0.6s ease-out forwards;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.4s ease-out forwards;
+  }
+
+  .animate-pulse-soft {
+    animation: pulseSoft 3s ease-in-out infinite;
+  }
+
+  /* Body scroll lock for mobile menu */
+  .overflow-hidden {
+    overflow: hidden;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseSoft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Paystack Payment Modal Z-Index Fix */
+/* Ensures Paystack payment interface appears above all application content and is clickable */
+/* Paystack typically creates elements with inline styles containing high z-index values */
+
+/* Target Paystack's main container div (usually has z-index: 999999999 in inline styles) */
+body > div[style*="z-index: 999999999"] {
+  z-index: var(--z-index-paystack-modal) !important;
+  pointer-events: auto !important;
+}
+
+/* Target Paystack's overlay/backdrop (usually has z-index: 999999998) */
+body > div[style*="z-index: 999999998"] {
+  z-index: var(--z-index-paystack-overlay) !important;
+  pointer-events: auto !important;
+}
+
+/* Target any Paystack iframes directly - use exact domain patterns */
+iframe[src*="paystack.co"],
+iframe[src*="checkout.paystack.com"] {
+  z-index: var(--z-index-paystack-modal) !important;
+  pointer-events: auto !important;
+}
+
+/* Ensure parent containers of Paystack iframes don't block pointer events */
+body > div[style*="position"][style*="z-index"] > iframe[src*="paystack"] {
+  pointer-events: auto !important;
+}
+
+/* Enable interaction with all Paystack modal content - target specific Paystack z-index values */
+body > div[style*="z-index: 999999999"] *,
+body > div[style*="z-index: 999999998"] * {
+  user-select: auto !important;
+  -webkit-user-select: auto !important;
+  -moz-user-select: auto !important;
+  -ms-user-select: auto !important;
+  pointer-events: auto !important;
+}
+
+/* Specifically target Paystack's container with fixed positioning and exact z-index values */
+body > div[style*="position: fixed"][style*="z-index: 999999999"],
+body > div[style*="position: fixed"][style*="z-index: 999999998"] {
+  pointer-events: auto !important;
+}
