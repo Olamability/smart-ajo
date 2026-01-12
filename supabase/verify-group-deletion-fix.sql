@@ -131,13 +131,16 @@ BEGIN
   
   -- Count orphaned groups (empty and older than 1 hour)
   SELECT COUNT(*) INTO orphaned_groups 
-  FROM groups g
-  LEFT JOIN group_members gm ON g.id = gm.group_id
-  WHERE g.current_members = 0 
-    AND g.status = 'forming'
-    AND g.created_at < NOW() - INTERVAL '1 hour'
-  GROUP BY g.id
-  HAVING COUNT(gm.id) = 0;
+  FROM (
+    SELECT g.id
+    FROM groups g
+    LEFT JOIN group_members gm ON g.id = gm.group_id
+    WHERE g.current_members = 0 
+      AND g.status = 'forming'
+      AND g.created_at < NOW() - INTERVAL '1 hour'
+    GROUP BY g.id
+    HAVING COUNT(gm.id) = 0
+  ) AS orphaned;
   
   -- Check policy
   SELECT EXISTS (
