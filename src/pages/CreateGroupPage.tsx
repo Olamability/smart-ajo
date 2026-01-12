@@ -222,12 +222,16 @@ export default function CreateGroupPage() {
                   // Navigate to group detail page
                   navigate(`/groups/${createdGroup.id}`);
                 } else {
-                  console.error('Payment processing failed:', processResult.error);
+                  console.error('Payment processing failed after verification:', processResult.error);
                   toast.error(
-                    processResult.error || 'Failed to process payment. Please contact support with reference: ' + response.reference
+                    `Failed to complete membership setup: ${processResult.error}. Please contact support with reference: ${response.reference}`,
+                    { duration: 10000 }
                   );
-                  // IMPORTANT: Don't delete group - payment was successful but processing failed
-                  // Support can manually complete the membership
+                  // CRITICAL FIX: Delete group since membership couldn't be established
+                  // Even though payment was verified, the group has no members
+                  // User can retry the entire flow with a new group
+                  console.log('Cleaning up group due to processing failure');
+                  await handleGroupCleanup(createdGroup.id, 'Payment processing failed after verification');
                   setShowPaymentDialog(false);
                   navigate('/groups');
                 }
@@ -258,10 +262,13 @@ export default function CreateGroupPage() {
                     setShowPaymentDialog(false);
                     navigate(`/groups/${createdGroup.id}`);
                   } else {
-                    console.error('Payment processing failed:', processResult.error);
+                    console.error('Payment processing failed after verification:', processResult.error);
                     toast.error(
-                      processResult.error || 'Failed to process payment. Please contact support with reference: ' + response.reference
+                      `Failed to complete membership setup: ${processResult.error}. Please contact support with reference: ${response.reference}`,
+                      { duration: 10000 }
                     );
+                    // Delete group since membership couldn't be established
+                    await handleGroupCleanup(createdGroup.id, 'Payment processing failed after verification');
                     setShowPaymentDialog(false);
                     navigate('/groups');
                   }
@@ -281,8 +288,11 @@ export default function CreateGroupPage() {
                   
                   toast.error(errorMessage, { duration: 10000 });
                   
-                  // IMPORTANT: Don't delete group if verification failed but payment might have succeeded
-                  // The webhook might still process it, or support can verify manually
+                  // CRITICAL FIX: Delete the group to prevent orphaned groups in the database
+                  // If payment was successful but verification failed, user can retry
+                  // This prevents groups with 0 members from accumulating in the system
+                  console.log('Cleaning up group due to verification failure');
+                  await handleGroupCleanup(createdGroup.id, 'Payment verification failed after all retries');
                   setShowPaymentDialog(false);
                   navigate('/groups');
                 }
@@ -300,9 +310,11 @@ export default function CreateGroupPage() {
               'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
               { duration: 10000 }
             );
-            // IMPORTANT: Group is NOT deleted here because payment may have succeeded in Paystack
-            // Support team can verify payment status and manually process if needed
-            // Alternative: Mark group as 'pending_verification' status for admin review
+            // CRITICAL FIX: Delete group when payment callback fails
+            // This prevents orphaned groups from accumulating in the system
+            // User can retry with a new group creation
+            console.log('Cleaning up group due to payment callback error');
+            await handleGroupCleanup(createdGroup.id, 'Payment callback error');
             setShowPaymentDialog(false);
             navigate('/groups');
           } finally {
