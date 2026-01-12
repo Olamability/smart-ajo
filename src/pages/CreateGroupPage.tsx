@@ -287,6 +287,7 @@ export default function CreateGroupPage() {
                   navigate('/groups');
                 }
               }
+            } else {
               toast.error('Payment was not successful');
               // Delete group since payment was not successful
               await handleGroupCleanup(createdGroup.id, 'Payment not successful');

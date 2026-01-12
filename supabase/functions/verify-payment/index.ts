@@ -112,9 +112,10 @@ async function verifyWithPaystack(
         const error = await response.json();
         errorMessage = error.message || errorMessage;
         console.error('Paystack API error:', error);
-      } catch (e) {
+      } catch (parseError) {
         const text = await response.text();
         console.error('Paystack API error (non-JSON):', text);
+        console.error('Parse error:', parseError);
         errorMessage = `HTTP ${response.status}: ${text || errorMessage}`;
       }
       throw new Error(errorMessage);

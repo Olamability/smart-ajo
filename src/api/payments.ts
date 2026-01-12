@@ -245,7 +245,15 @@ export const verifyPayment = async (
 
       // Return successful verification
       console.log('Payment verification successful:', data);
-      return data;
+      // Ensure consistent return structure
+      return {
+        success: data.success !== false,
+        payment_status: data.payment_status || 'success',
+        verified: data.verified === true,
+        amount: data.amount || 0,
+        message: data.message || 'Payment verified successfully',
+        data: data.data,
+      };
     } catch (error) {
       console.error(`Verify payment error (attempt ${attempt}):`, error);
       lastError = getErrorMessage(error, 'Failed to verify payment');
