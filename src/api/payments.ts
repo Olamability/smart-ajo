@@ -166,9 +166,27 @@ export const verifyPayment = async (
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
 
-      // Call the verify-payment Edge Function
+      // Get the current session to ensure we have a valid access token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        console.error('No active session found');
+        return {
+          success: false,
+          payment_status: 'unauthorized',
+          verified: false,
+          amount: 0,
+          message: 'Authentication required. Please log in again.',
+          error: 'No active session',
+        };
+      }
+
+      // Call the verify-payment Edge Function with explicit authorization header
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       console.log('Edge Function response:', { data, error });
