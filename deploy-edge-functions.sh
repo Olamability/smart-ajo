@@ -57,7 +57,7 @@ for func in "${FUNCTIONS[@]}"; do
         continue
     fi
     
-    if supabase functions deploy "$func"; then
+    if supabase functions deploy "$func" --no-verify; then
         echo -e "${GREEN}✓ $func deployed successfully${NC}"
     else
         echo -e "${RED}✗ Failed to deploy $func${NC}"
