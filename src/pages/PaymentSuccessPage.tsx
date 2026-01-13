@@ -140,7 +140,6 @@ export default function PaymentSuccessPage() {
                 variant="outline"
                 className="flex-1"
                 onClick={handleVerifyPayment}
-                disabled={verificationStatus === 'verifying'}
               >
                 Retry Verification
               </Button>
