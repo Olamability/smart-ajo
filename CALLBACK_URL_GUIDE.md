@@ -87,7 +87,7 @@ Main Dashboard:
 https://your-app-domain.com/dashboard
 
 Payment Success Page:
-https://your-app-domain.com/payment-success
+https://your-app-domain.com/payment/success
 
 Specific Group Page:
 https://your-app-domain.com/groups/{groupId}
@@ -99,7 +99,7 @@ Main Dashboard:
 http://localhost:3000/dashboard
 
 Payment Success Page:
-http://localhost:3000/payment-success
+http://localhost:3000/payment/success
 
 Specific Group Page:
 http://localhost:3000/groups/{groupId}
@@ -114,12 +114,12 @@ http://localhost:3000/groups/{groupId}
 
 2. **Add the route where you want users to land:**
    - Dashboard: `/dashboard`
-   - Payment success: `/payment-success`
+   - Payment success: `/payment/success`
    - Group detail: `/groups/{groupId}`
 
 3. **Combine them:**
    - `https://your-app-domain.com/dashboard`
-   - `https://your-app-domain.com/payment-success`
+   - `https://your-app-domain.com/payment/success`
 
 ### Finding Your Deployed URL
 
@@ -147,10 +147,10 @@ Smart Ajo uses callback URLs **optionally** for better user experience, but reli
 
 #### Where Callback URLs are Used
 
-1. **Payment Success Page** (`/payment-success`)
+1. **Payment Success Page** (`/payment/success`)
    - Location: `src/pages/PaymentSuccessPage.tsx`
    - Purpose: Show user payment confirmation
-   - URL example: `https://your-app.com/payment-success?reference=PAY_123456`
+   - URL example: `https://your-app.com/payment/success?reference=PAY_123456`
 
 2. **Dashboard Redirect** (`/dashboard`)
    - Purpose: Return user to their dashboard after payment
@@ -235,7 +235,7 @@ await paystackService.initializePayment({
 1. Log in to [Paystack Dashboard](https://dashboard.paystack.com)
 2. Go to **Settings** → **API Keys & Webhooks**
 3. Scroll to **Callback URL** section
-4. Enter your default callback URL: `https://your-app.com/payment-success`
+4. Enter your default callback URL: `https://your-app.com/payment/success`
 5. Click **Save Changes**
 
 **Note**: URL passed in code will override the dashboard setting.
@@ -251,7 +251,7 @@ VITE_APP_URL=https://your-app-domain.com
 
 Then use it in code:
 ```typescript
-const callbackUrl = `${import.meta.env.VITE_APP_URL}/payment-success`;
+const callbackUrl = `${import.meta.env.VITE_APP_URL}/payment/success`;
 ```
 
 ### Recommended Approach for Smart Ajo
@@ -261,7 +261,7 @@ const callbackUrl = `${import.meta.env.VITE_APP_URL}/payment-success`;
 ```typescript
 // In src/lib/paystack.ts or where you initialize payment
 const baseUrl = import.meta.env.VITE_APP_URL || 'http://localhost:3000';
-const callbackUrl = `${baseUrl}/payment-success`;
+const callbackUrl = `${baseUrl}/payment/success`;
 
 await paystackService.initializePayment({
   // ... other params
@@ -341,10 +341,10 @@ async function payWithCustomCallback(groupId: string) {
 ```typescript
 const groupId = 'abc-123';
 const userId = 'user-456';
-const callbackUrl = `${baseUrl}/payment-success?group=${groupId}&user=${userId}`;
+const callbackUrl = `${baseUrl}/payment/success?group=${groupId}&user=${userId}`;
 
 // Paystack will redirect to:
-// https://your-app.com/payment-success?group=abc-123&user=user-456&reference=PAY_789
+// https://your-app.com/payment/success?group=abc-123&user=user-456&reference=PAY_789
 ```
 
 Then in your `PaymentSuccessPage.tsx`:
@@ -398,7 +398,7 @@ await paystackService.initializePayment({
 
 1. **No callback_url provided**
    - Solution: Add `callback_url` when initializing payment
-   - Example: `callback_url: '${baseUrl}/payment-success'`
+   - Example: `callback_url: '${baseUrl}/payment/success'`
 
 2. **Invalid callback_url format**
    - Solution: Ensure URL is fully qualified (includes `https://`)
@@ -420,7 +420,7 @@ Ensure the route exists in your React Router configuration.
 
 In `src/App.tsx`, verify routes:
 ```typescript
-<Route path="/payment-success" element={<PaymentSuccessPage />} />
+<Route path="/payment/success" element={<PaymentSuccessPage />} />
 <Route path="/dashboard" element={<DashboardPage />} />
 ```
 
@@ -473,7 +473,7 @@ This error means Paystack requires a callback URL for your account.
 
 **Fix:**
 1. Set default in Paystack Dashboard: Settings → Callback URL
-2. OR provide in code: `callback_url: '${baseUrl}/payment-success'`
+2. OR provide in code: `callback_url: '${baseUrl}/payment/success'`
 
 ---
 
@@ -554,7 +554,7 @@ VITE_APP_URL=https://smartajo.com
 ```
 
 Then your callback URLs will be:
-- `https://smartajo.com/payment-success`
+- `https://smartajo.com/payment/success`
 - `https://smartajo.com/dashboard`
 
 ### Q7: Can I pass extra data in the callback URL?
@@ -562,12 +562,12 @@ Then your callback URLs will be:
 **A:** Yes, using query parameters:
 
 ```typescript
-const callbackUrl = `${baseUrl}/payment-success?group=${groupId}&ref=${customRef}`;
+const callbackUrl = `${baseUrl}/payment/success?group=${groupId}&ref=${customRef}`;
 ```
 
 Paystack will preserve your parameters and add its own:
 ```
-https://your-app.com/payment-success?group=123&ref=abc&reference=PAY_456&trxref=PAY_456
+https://your-app.com/payment/success?group=123&ref=abc&reference=PAY_456&trxref=PAY_456
 ```
 
 ### Q8: How do I test callback URLs locally?
@@ -576,13 +576,13 @@ https://your-app.com/payment-success?group=123&ref=abc&reference=PAY_456&trxref=
 
 **Option 1: Use localhost** (easiest for testing)
 ```typescript
-callback_url: 'http://localhost:3000/payment-success'
+callback_url: 'http://localhost:3000/payment/success'
 ```
 
 **Option 2: Use ngrok** (for testing with production-like URLs)
 ```bash
 ngrok http 3000
-# Use the ngrok URL: https://abc123.ngrok.io/payment-success
+# Use the ngrok URL: https://abc123.ngrok.io/payment/success
 ```
 
 ### Q9: Does Smart Ajo require callback URLs?
@@ -619,14 +619,14 @@ With callback URL:
   
 - [ ] Choose where to redirect users
   - Dashboard: `/dashboard`
-  - Payment success: `/payment-success`
+  - Payment success: `/payment/success`
   - Group page: `/groups/{groupId}`
   
 - [ ] Set environment variable
   - `VITE_APP_URL=https://your-app.com`
   
 - [ ] Pass to Paystack when initializing payment
-  - `callback_url: '${import.meta.env.VITE_APP_URL}/payment-success'`
+  - `callback_url: '${import.meta.env.VITE_APP_URL}/payment/success'`
   
 - [ ] Create the route in React Router
   - Add route in `src/App.tsx`
