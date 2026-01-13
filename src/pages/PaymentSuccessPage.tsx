@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Shield } from 'lucide-react';
 
 export default function PaymentSuccessPage() {
   const navigate = useNavigate();
@@ -25,7 +24,7 @@ export default function PaymentSuccessPage() {
         <CardHeader className="space-y-1">
           <div className="flex items-center justify-center mb-4">
             <div className="w-12 h-12 rounded-lg bg-gradient-hero flex items-center justify-center">
-              <Shield className="w-6 h-6 text-primary-foreground" />
+              <CreditCard className="w-6 h-6 text-primary-foreground" />
             </div>
           </div>
           <CardTitle className="text-2xl text-center">
