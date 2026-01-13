@@ -155,10 +155,26 @@ export const verifyPayment = async (
 ): Promise<VerifyPaymentResponse> => {
   let lastError: string = '';
   
+  // Get the current session once before attempting retries
+  // Session is unlikely to change during retry attempts
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (!session?.access_token) {
+    console.error('No active session found');
+    return {
+      success: false,
+      payment_status: 'unauthorized',
+      verified: false,
+      amount: 0,
+      message: 'Authentication required. Please log in again.',
+      error: 'No active session',
+    };
+  }
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`Verifying payment with reference: ${reference} (attempt ${attempt}/${retries})`);
-      const supabase = createClient();
 
       // Add a small delay before first retry (not on first attempt)
       if (attempt > 1) {
@@ -166,9 +182,12 @@ export const verifyPayment = async (
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
 
-      // Call the verify-payment Edge Function
+      // Call the verify-payment Edge Function with explicit authorization header
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       console.log('Edge Function response:', { data, error });
