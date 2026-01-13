@@ -8,11 +8,12 @@ This document explains the Content Security Policy (CSP) configuration in `verce
 
 ```
 default-src 'self';
-script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://*.paystack.co https://vercel.live;
+script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://vercel.live;
+script-src-elem 'self' 'unsafe-inline' https://js.paystack.co https://vercel.live;
 style-src 'self' 'unsafe-inline' https://paystack.com https://fonts.googleapis.com;
 font-src 'self' https://fonts.gstatic.com;
 img-src 'self' data: https: blob:;
-connect-src 'self' https://*.supabase.co https://api.paystack.co https://*.paystack.co wss://*.supabase.co https://vercel.live;
+connect-src 'self' https://*.supabase.co https://api.paystack.co wss://*.supabase.co https://vercel.live;
 frame-src 'self' https://checkout.paystack.com;
 object-src 'none';
 base-uri 'self';
@@ -89,21 +90,19 @@ form-action 'self'
 
 **Scripts:**
 - `https://js.paystack.co` - Paystack Inline JS library
-- `https://*.paystack.co` - Paystack fraud detection and fingerprinting scripts (e.g., standard.paystack.co)
 
 **Styles:**
 - `https://paystack.com` - Paystack button CSS and styles
 
 **API:**
 - `https://api.paystack.co` - Paystack API for payment operations
-- `https://*.paystack.co` - Paystack fraud detection and verification endpoints
 
 **Frames:**
 - `https://checkout.paystack.com` - Paystack payment modal iframe
 
 **Why trusted:** Official Paystack domains, required for PCI DSS compliant payment processing
 
-**Note on Fingerprinting:** Paystack's fraud detection system loads fingerprint scripts dynamically from subdomains like `standard.paystack.co`. These scripts may include query parameters (e.g., `/v2.22/fingerprint?MerchantId=xxx`) which the CSP specification doesn't support in path-based directives. Using the wildcard `https://*.paystack.co` allows these scripts to load properly without CSP warnings.
+**Note on Fingerprinting:** Fingerprinting and fraud detection scripts from Paystack subdomains (e.g., `standard.paystack.co`) have been disabled by removing the wildcard `https://*.paystack.co` from the CSP. This prevents CSP warnings about query parameters in script paths and removes unnecessary fraud detection overhead. The core payment functionality through `js.paystack.co` and `checkout.paystack.com` remains fully functional.
 
 ### Supabase (Backend)
 
