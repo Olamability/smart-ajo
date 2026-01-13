@@ -19,6 +19,7 @@ import SystemAdminLoginPage from '@/pages/SystemAdminLoginPage';
 import KYCVerificationPage from '@/pages/KYCVerificationPage';
 import TransactionsPage from '@/pages/TransactionsPage';
 import ProfileSettingsPage from '@/pages/ProfileSettingsPage';
+import PaymentSuccessPage from '@/pages/PaymentSuccessPage';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route path="/payment/success" element={<PaymentSuccessPage />} />
             <Route 
               path="/dashboard" 
               element={
