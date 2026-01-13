@@ -24,6 +24,7 @@ interface PaystackPaymentData {
   metadata?: Record<string, any>;
   callback?: (response: PaystackResponse) => void;
   onClose?: () => void;
+  callback_url?: string; // Optional URL to redirect to after payment
 }
 
 interface PaystackResponse {
@@ -120,6 +121,7 @@ class PaystackService {
       amount: data.amount, // Amount should already be in kobo
       ref: data.reference,
       metadata: data.metadata || {},
+      callback_url: data.callback_url, // Optional redirect URL after payment
       callback: (response: PaystackResponse) => {
         if (data.callback) {
           data.callback(response);
