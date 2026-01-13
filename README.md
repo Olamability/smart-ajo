@@ -55,14 +55,20 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 
 ## 📚 Documentation
 
+### Getting Started
 - **[Environment Setup Guide](./ENVIRONMENT_SETUP.md)** - Detailed environment configuration and troubleshooting
 - **[Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)** - **Step-by-step guide for deploying to Vercel**
-- **[Payment CORS Fix - COMPLETE GUIDE](./PAYMENT_CORS_FIX_COMPLETE.md)** - **🔥 Fix payment verification CORS errors**
-- **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - Fix CORS errors with Edge Functions
-- **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
-- **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup
-- **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
 - **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Production deployment instructions
+
+### Payment Integration
+- **[Callback URL Guide](./CALLBACK_URL_GUIDE.md)** - **📍 What are callback URLs and how to find them**
+- **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup and webhook configuration
+- **[Payment CORS Fix - COMPLETE GUIDE](./PAYMENT_CORS_FIX_COMPLETE.md)** - **🔥 Fix payment verification CORS errors**
+
+### Architecture & Backend
+- **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
+- **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - Fix CORS errors with Edge Functions
+- **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
 
 ## 🛠️ Development
 

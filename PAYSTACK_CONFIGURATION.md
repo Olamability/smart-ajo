@@ -52,18 +52,52 @@ https://kvxokszuonvdvsazoktc.supabase.co/functions/v1/paystack-webhook
 6. Click **Save**
 
 ### 2. Callback URL (Payment Success Redirect)
-After a successful payment, users can be redirected to:
 
+**What is a Callback URL?** A callback URL is where users are automatically redirected after completing payment on Paystack. It's **optional** and only affects user experience.
+
+#### Quick Answer:
+
+**Your callback URLs are based on your domain:**
+
+Local Development:
 ```
+http://localhost:3000/payment/success
+http://localhost:3000/dashboard
+http://localhost:3000/groups/{groupId}
+```
+
+Production (Replace with your actual domain):
+```
+https://your-app-domain.com/payment/success
 https://your-app-domain.com/dashboard
-```
-
-Or for specific group context:
-```
 https://your-app-domain.com/groups/{groupId}
 ```
 
-**Note**: The callback URL is optional. The payment verification is handled by the webhook, not the callback. The callback is just for user experience (showing them a success page).
+#### How to Find Your Callback URL:
+
+1. **Find your base URL:**
+   - Check your `.env` file: `VITE_APP_URL=https://your-app-domain.com`
+   - Or check your deployed URL on Vercel/Netlify dashboard
+   
+2. **Add the page route:**
+   - For dashboard: `/dashboard`
+   - For payment success: `/payment/success`
+   - For group page: `/groups/{groupId}`
+
+3. **Combine them:**
+   - `https://your-app-domain.com/payment/success`
+
+#### Important Notes:
+
+⚠️ **Callback URL vs Webhook URL**: These are different!
+- **Callback URL**: Where **users** are redirected (optional, for UX)
+- **Webhook URL**: Where **Paystack notifies your server** (required, for verification)
+
+✅ **The callback URL is OPTIONAL.** Payment verification is handled by the webhook, not the callback.
+
+🔐 **Security**: NEVER trust the callback URL for payment verification. Always use the webhook.
+
+📖 **For Complete Guide**: See [CALLBACK_URL_GUIDE.md](./CALLBACK_URL_GUIDE.md) for detailed explanations, examples, and troubleshooting.
 
 ---
 
