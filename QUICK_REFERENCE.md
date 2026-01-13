@@ -4,7 +4,13 @@
 
 ### Paystack Integration
 - **Webhook URL**: `https://kvxokszuonvdvsazoktc.supabase.co/functions/v1/paystack-webhook`
-- **Callback URL**: `https://your-app-domain.com/dashboard` or `/groups/{groupId}`
+  - Purpose: Server-to-server payment verification (REQUIRED)
+  - Configure in: Paystack Dashboard → Settings → Webhooks
+  
+- **Callback URL**: `https://your-app-domain.com/payment-success` or `/dashboard` or `/groups/{groupId}`
+  - Purpose: Redirect users after payment (OPTIONAL)
+  - ❓ **Don't know your callback URL?** See [CALLBACK_URL_GUIDE.md](./CALLBACK_URL_GUIDE.md)
+  - **Note**: Callback URL ≠ Webhook URL (they serve different purposes!)
 
 ### Application Routes
 | Route | Purpose | Access |
