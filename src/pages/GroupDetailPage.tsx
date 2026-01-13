@@ -244,6 +244,7 @@ export default function GroupDetailPage() {
           user_id: user.id,
           preferred_slot: userJoinRequest.preferred_slot,
         },
+        callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
         callback: async (response: PaystackResponse) => {
           try {
             // Payment successful, verify on backend

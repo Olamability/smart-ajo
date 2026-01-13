@@ -192,6 +192,7 @@ export default function CreateGroupPage() {
           user_id: user.id,
           preferred_slot: selectedSlot,
         },
+        callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${createdGroup.id}`,
         callback: async (response: PaystackResponse) => {
           try {
             paymentCallbackExecutedRef.current = true; // Mark callback as executed
