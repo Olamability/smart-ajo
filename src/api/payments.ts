@@ -156,18 +156,37 @@ export const verifyPayment = async (
   let lastError: string = '';
   
   // Get the current session once before attempting retries
-  // Session is unlikely to change during retry attempts
+  // IMPORTANT: Use getUser() first to validate the token and trigger refresh if needed.
+  // getSession() only retrieves from local storage without validation, which can lead to
+  // using expired tokens. getUser() makes a network call to verify the JWT is still valid.
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
   
-  if (!session?.access_token) {
-    console.error('No active session found');
+  // First, verify user is authenticated and get a fresh session
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  
+  if (userError || !user) {
+    console.error('User authentication failed:', userError?.message || 'No user found');
     return {
       success: false,
       payment_status: 'unauthorized',
       verified: false,
       amount: 0,
       message: 'Authentication required. Please log in again.',
+      error: userError?.message || 'No authenticated user',
+    };
+  }
+  
+  // Now get the session which should be fresh after getUser() validates it
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (!session?.access_token) {
+    console.error('No active session found after user verification');
+    return {
+      success: false,
+      payment_status: 'unauthorized',
+      verified: false,
+      amount: 0,
+      message: 'Session expired. Please log in again.',
       error: 'No active session',
     };
   }
@@ -195,6 +214,24 @@ export const verifyPayment = async (
       if (error) {
         console.error('Payment verification error:', error);
         lastError = error.message;
+        
+        // Check if it's a 401 authentication error using context if available
+        // FunctionsHttpError may have context.status
+        const isAuthError = error.message.includes('401') || 
+                           error.message.includes('Unauthorized') ||
+                           (error as any).context?.status === 401;
+        
+        if (isAuthError) {
+          console.error('Authentication error - session may be invalid or expired');
+          return {
+            success: false,
+            payment_status: 'unauthorized',
+            verified: false,
+            amount: 0,
+            message: 'Your session has expired. Please log out and log in again, then try the payment.',
+            error: 'Authentication failed',
+          };
+        }
         
         // If it's a network error or timeout, retry
         if (attempt < retries && (
