@@ -28,7 +28,11 @@ export default function PaymentSuccessPage() {
     }
 
     setVerificationStatus('verifying');
-    console.log('Verifying payment with reference:', reference);
+    
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.log('Verifying payment with reference:', reference);
+    }
 
     try {
       const result = await verifyPayment(reference);
@@ -43,7 +47,9 @@ export default function PaymentSuccessPage() {
         toast.error(result.message || 'Payment verification failed');
       }
     } catch (error) {
-      console.error('Verification error:', error);
+      if (import.meta.env.DEV) {
+        console.error('Verification error:', error);
+      }
       setVerificationStatus('failed');
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
@@ -55,7 +61,8 @@ export default function PaymentSuccessPage() {
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
-  }, [reference, verificationStatus, handleVerifyPayment]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reference, verificationStatus]);
 
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard

@@ -442,13 +442,15 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
     
     if (authError || !user) {
+      // Log detailed error server-side only
       console.error('Authentication failed:', authError?.message || 'No user found');
       console.error('Auth error details:', JSON.stringify(authError));
+      
+      // Return generic error to client (don't expose auth details)
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
           message: 'Invalid or expired authentication token. Please log in again.',
-          details: authError?.message,
         }),
         {
           status: 401,
