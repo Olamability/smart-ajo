@@ -61,14 +61,14 @@ https://kvxokszuonvdvsazoktc.supabase.co/functions/v1/paystack-webhook
 
 Local Development:
 ```
-http://localhost:3000/payment-success
+http://localhost:3000/payment/success
 http://localhost:3000/dashboard
 http://localhost:3000/groups/{groupId}
 ```
 
 Production (Replace with your actual domain):
 ```
-https://your-app-domain.com/payment-success
+https://your-app-domain.com/payment/success
 https://your-app-domain.com/dashboard
 https://your-app-domain.com/groups/{groupId}
 ```
@@ -81,11 +81,11 @@ https://your-app-domain.com/groups/{groupId}
    
 2. **Add the page route:**
    - For dashboard: `/dashboard`
-   - For payment success: `/payment-success`
+   - For payment success: `/payment/success`
    - For group page: `/groups/{groupId}`
 
 3. **Combine them:**
-   - `https://your-app-domain.com/payment-success`
+   - `https://your-app-domain.com/payment/success`
 
 #### Important Notes:
 
