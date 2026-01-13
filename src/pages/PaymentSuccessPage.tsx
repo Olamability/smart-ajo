@@ -9,6 +9,7 @@ export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
   
   // Get payment reference from URL query params (if provided by Paystack)
+  // Paystack may send either 'reference' or 'trxref' depending on callback configuration
   const reference = searchParams.get('reference') || searchParams.get('trxref');
 
   useEffect(() => {
