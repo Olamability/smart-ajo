@@ -223,11 +223,12 @@ async function storePaymentRecord(
 
 /**
  * Execute business logic based on payment type
+ * ALL business logic MUST be executed here on the backend
  */
 async function executeBusinessLogic(
   supabase: any,
   paystackData: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; position?: number }> {
   const metadata = paystackData.metadata || {};
   const paymentType = metadata.type;
 
@@ -244,14 +245,9 @@ async function executeBusinessLogic(
     case 'security_deposit':
       return await processSecurityDeposit(supabase, paystackData);
     case 'group_creation':
+      return await processGroupCreationPayment(supabase, paystackData);
     case 'group_join':
-      // These payment types are handled by separate RPC functions
-      // (process_group_creation_payment and process_group_join_payment)
-      // after verification, so we just acknowledge the verification here
-      return {
-        success: true,
-        message: 'Payment verified successfully',
-      };
+      return await processGroupJoinPayment(supabase, paystackData);
     default:
       return {
         success: false,
@@ -383,6 +379,371 @@ async function processSecurityDeposit(
   }
 
   return { success: true, message: 'Security deposit payment processed successfully' };
+}
+
+/**
+ * Helper function to create first contribution record
+ */
+async function createFirstContribution(
+  supabase: any,
+  groupId: string,
+  userId: string,
+  amount: number,
+  reference: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('contributions')
+    .insert({
+      group_id: groupId,
+      user_id: userId,
+      amount: amount,
+      cycle_number: 1,
+      status: 'paid',
+      due_date: new Date().toISOString(),
+      paid_date: new Date().toISOString(),
+      transaction_ref: reference,
+    });
+
+  if (error) {
+    console.error('Failed to create contribution:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Helper function to create payment transaction records
+ */
+async function createPaymentTransactions(
+  supabase: any,
+  groupId: string,
+  userId: string,
+  reference: string,
+  securityDepositAmount: number,
+  contributionAmount: number,
+  isCreator: boolean
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('transactions')
+    .insert([
+      {
+        user_id: userId,
+        group_id: groupId,
+        type: 'security_deposit',
+        amount: securityDepositAmount,
+        status: 'completed',
+        reference: reference + '_SD',
+        description: isCreator ? 'Security deposit for group creation' : 'Security deposit for joining group',
+        completed_at: new Date().toISOString(),
+      },
+      {
+        user_id: userId,
+        group_id: groupId,
+        type: 'contribution',
+        amount: contributionAmount,
+        status: 'completed',
+        reference: reference + '_C1',
+        description: 'First contribution payment',
+        completed_at: new Date().toISOString(),
+      },
+    ]);
+
+  if (error) {
+    console.error('Failed to create transactions:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Helper function to increment group member count
+ * Uses RPC function for atomic increment to avoid race conditions
+ */
+async function incrementGroupMemberCount(
+  supabase: any,
+  groupId: string
+): Promise<boolean> {
+  // Use atomic increment via SQL to avoid race conditions
+  const { error } = await supabase.rpc('increment_group_member_count', {
+    p_group_id: groupId
+  });
+
+  if (error) {
+    console.error('Failed to increment member count:', error);
+    // Fallback to manual update if RPC doesn't exist
+    const { error: updateError } = await supabase
+      .from('groups')
+      .update({
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', groupId)
+      .select('current_members')
+      .single()
+      .then(async ({ data: group }: any) => {
+        if (group) {
+          return await supabase
+            .from('groups')
+            .update({
+              current_members: group.current_members + 1,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', groupId)
+            .eq('current_members', group.current_members); // Optimistic locking
+        }
+        return { error: null };
+      });
+    
+    if (updateError) {
+      console.error('Fallback update also failed:', updateError);
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Process group creation payment
+ * Activates creator as member after payment is verified
+ */
+async function processGroupCreationPayment(
+  supabase: any,
+  data: PaystackVerificationResponse['data']
+): Promise<{ success: boolean; message: string; position?: number }> {
+  const { reference, amount, metadata } = data;
+  const userId = metadata?.user_id;
+  const groupId = metadata?.group_id;
+  const preferredSlot = metadata?.preferred_slot || 1;
+
+  if (!userId || !groupId) {
+    return { success: false, message: 'Missing required metadata for group creation' };
+  }
+
+  console.log(`Processing group creation payment for user ${userId} in group ${groupId}`);
+
+  // Get group details
+  const { data: group, error: groupError } = await supabase
+    .from('groups')
+    .select('contribution_amount, security_deposit_amount')
+    .eq('id', groupId)
+    .single();
+
+  if (groupError || !group) {
+    console.error('Group not found:', groupError);
+    return { success: false, message: 'Group not found' };
+  }
+
+  // Verify payment amount
+  const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
+  if (amount < requiredAmount) {
+    return {
+      success: false,
+      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
+    };
+  }
+
+  // Check if user is already a member (idempotency)
+  const { data: existingMember } = await supabase
+    .from('group_members')
+    .select('id, position')
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (existingMember) {
+    console.log('User already a member, skipping duplicate processing');
+    return {
+      success: true,
+      message: 'User is already a member of this group',
+      position: existingMember.position,
+    };
+  }
+
+  // Add creator as member with selected slot position
+  const { error: memberError } = await supabase
+    .from('group_members')
+    .insert({
+      group_id: groupId,
+      user_id: userId,
+      position: preferredSlot,
+      status: 'active',
+      has_paid_security_deposit: true,
+      security_deposit_amount: group.security_deposit_amount,
+      security_deposit_paid_at: new Date().toISOString(),
+      is_creator: true,
+    });
+
+  if (memberError) {
+    console.error('Failed to add member:', memberError);
+    return { success: false, message: 'Failed to add member to group' };
+  }
+
+  // Create first contribution record using helper
+  await createFirstContribution(supabase, groupId, userId, group.contribution_amount, reference);
+
+  // Create transaction records using helper
+  await createPaymentTransactions(
+    supabase,
+    groupId,
+    userId,
+    reference,
+    group.security_deposit_amount,
+    group.contribution_amount,
+    true // isCreator
+  );
+
+  // Increment group member count using atomic operation
+  await incrementGroupMemberCount(supabase, groupId);
+
+  console.log('Group creation payment processed successfully');
+  return {
+    success: true,
+    message: 'Group creation payment processed successfully',
+    position: preferredSlot,
+  };
+}
+
+/**
+ * Process group join payment
+ * Adds member to group after payment is verified
+ */
+async function processGroupJoinPayment(
+  supabase: any,
+  data: PaystackVerificationResponse['data']
+): Promise<{ success: boolean; message: string; position?: number }> {
+  const { reference, amount, metadata } = data;
+  const userId = metadata?.user_id;
+  const groupId = metadata?.group_id;
+  const preferredSlot = metadata?.preferred_slot;
+
+  if (!userId || !groupId) {
+    return { success: false, message: 'Missing required metadata for group join' };
+  }
+
+  console.log(`Processing group join payment for user ${userId} in group ${groupId}`);
+
+  // Get group details
+  const { data: group, error: groupError } = await supabase
+    .from('groups')
+    .select('contribution_amount, security_deposit_amount, current_members, max_members')
+    .eq('id', groupId)
+    .single();
+
+  if (groupError || !group) {
+    console.error('Group not found:', groupError);
+    return { success: false, message: 'Group not found' };
+  }
+
+  // Verify payment amount
+  const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
+  if (amount < requiredAmount) {
+    return {
+      success: false,
+      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
+    };
+  }
+
+  // Check if user is already a member (idempotency)
+  const { data: existingMember } = await supabase
+    .from('group_members')
+    .select('id, position')
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (existingMember) {
+    console.log('User already a member, skipping duplicate processing');
+    return {
+      success: true,
+      message: 'User is already a member of this group',
+      position: existingMember.position,
+    };
+  }
+
+  // Check if group is full
+  if (group.current_members >= group.max_members) {
+    return { success: false, message: 'Group is full' };
+  }
+
+  // Determine position (use preferred slot if provided and available, otherwise next available)
+  let position = preferredSlot;
+  if (!position) {
+    // Find next available position
+    const { data: members } = await supabase
+      .from('group_members')
+      .select('position')
+      .eq('group_id', groupId)
+      .order('position', { ascending: true });
+
+    const occupiedPositions = new Set((members || []).map((m: any) => m.position));
+    for (let i = 1; i <= group.max_members; i++) {
+      if (!occupiedPositions.has(i)) {
+        position = i;
+        break;
+      }
+    }
+  }
+
+  if (!position) {
+    return { success: false, message: 'No available positions in group' };
+  }
+
+  // Add member to group
+  const { error: memberError } = await supabase
+    .from('group_members')
+    .insert({
+      group_id: groupId,
+      user_id: userId,
+      position: position,
+      status: 'active',
+      has_paid_security_deposit: true,
+      security_deposit_amount: group.security_deposit_amount,
+      security_deposit_paid_at: new Date().toISOString(),
+      is_creator: false,
+    });
+
+  if (memberError) {
+    console.error('Failed to add member:', memberError);
+    return { success: false, message: 'Failed to add member to group' };
+  }
+
+  // Create first contribution record using helper
+  await createFirstContribution(supabase, groupId, userId, group.contribution_amount, reference);
+
+  // Create transaction records using helper
+  await createPaymentTransactions(
+    supabase,
+    groupId,
+    userId,
+    reference,
+    group.security_deposit_amount,
+    group.contribution_amount,
+    false // isCreator
+  );
+
+  // Increment group member count using atomic operation
+  await incrementGroupMemberCount(supabase, groupId);
+
+  // If this was an approved join request, update the join request status
+  const { error: joinReqError } = await supabase
+    .from('join_requests')
+    .update({
+      status: 'joined',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('group_id', groupId)
+    .eq('user_id', userId)
+    .eq('status', 'approved');
+
+  if (joinReqError) {
+    console.error('Failed to update join request:', joinReqError);
+  }
+
+  console.log('Group join payment processed successfully');
+  return {
+    success: true,
+    message: 'Group join payment processed successfully',
+    position: position,
+  };
 }
 
 serve(async (req) => {
@@ -624,6 +985,7 @@ serve(async (req) => {
         verified: verificationResponse.data.status === 'success',
         amount: verificationResponse.data.amount,
         message: businessLogicResult.message,
+        position: businessLogicResult.position, // Include position for group join/creation
         data: {
           reference: verificationResponse.data.reference,
           amount: verificationResponse.data.amount,
