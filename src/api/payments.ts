@@ -156,17 +156,42 @@ export const verifyPayment = async (
 ): Promise<VerifyPaymentResponse> => {
   let lastError: string = '';
   
-  // Get the current session once before attempting retries
-  // IMPORTANT: Use getUser() first to validate the token and trigger refresh if needed.
-  // getSession() only retrieves from local storage without validation, which can lead to
-  // using expired tokens. getUser() makes a network call to verify the JWT is still valid.
   const supabase = createClient();
   
   console.log('=== PAYMENT VERIFICATION FLOW START ===');
   console.log('Reference:', reference);
   console.log('Timestamp:', new Date().toISOString());
   
-  // First, verify user is authenticated and get a fresh session
+  // Proactively refresh the session to ensure we have a valid token
+  // This is critical for payment flows where the user might have been away from the app
+  // (e.g., completing payment on Paystack) and their session may have expired
+  console.log('Proactively refreshing session before verification...');
+  const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+  
+  if (refreshError || !refreshData.session) {
+    console.error('Failed to refresh session:', refreshError?.message || 'No session returned');
+    
+    // Try to get the current session as fallback
+    const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+    
+    if (!fallbackSession?.access_token) {
+      console.error('No valid session available');
+      return {
+        success: false,
+        payment_status: 'unauthorized',
+        verified: false,
+        amount: 0,
+        message: 'Your session has expired. Please log out and log in again, then try the payment.',
+        error: 'Session expired - please log in again',
+      };
+    }
+    
+    console.log('Using fallback session (refresh failed but session still exists)');
+  } else {
+    console.log('Session refreshed successfully');
+  }
+  
+  // Get the current user to verify authentication
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   
   if (userError || !user) {
@@ -189,11 +214,11 @@ export const verifyPayment = async (
     console.log('User authenticated successfully');
   }
   
-  // Now get the session which should be fresh after getUser() validates it
+  // Get the fresh session (should be available after refresh)
   const { data: { session } } = await supabase.auth.getSession();
   
   if (!session?.access_token) {
-    console.error('No active session found after user verification');
+    console.error('No active session found after refresh and user verification');
     return {
       success: false,
       payment_status: 'unauthorized',
@@ -249,44 +274,8 @@ export const verifyPayment = async (
                            (error as any).context?.status === 401;
         
         if (isAuthError) {
-          console.error('Authentication error detected - session may be invalid or expired');
-          // On auth error, try refreshing session and retry once
-          if (attempt === 1) {
-            console.log('Attempting to refresh session...');
-            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-            if (!refreshError && refreshData.session) {
-              console.log('Session refreshed successfully, retrying with new token...');
-              // Update session with refreshed token for retry
-              const refreshedSession = refreshData.session;
-              
-              // Retry immediately with refreshed session
-              try {
-                const { data: retryData, error: retryError } = await supabase.functions.invoke('verify-payment', {
-                  body: { reference },
-                  headers: {
-                    Authorization: `Bearer ${refreshedSession.access_token}`,
-                  },
-                });
-                
-                if (!retryError && retryData && !retryData.error) {
-                  console.log('Verification successful after session refresh!');
-                  return {
-                    success: retryData.success !== false,
-                    payment_status: retryData.payment_status || 'success',
-                    verified: retryData.verified === true,
-                    amount: retryData.amount || 0,
-                    message: retryData.message || 'Payment verified successfully',
-                    data: retryData.data,
-                  };
-                }
-              } catch (retryErr) {
-                console.error('Retry after refresh failed:', retryErr);
-              }
-            } else {
-              console.error('Session refresh failed:', refreshError?.message);
-            }
-          }
-          
+          console.error('Authentication error detected - this should not happen after proactive session refresh');
+          // Since we already refreshed the session at the start, this is a genuine auth issue
           return {
             success: false,
             payment_status: 'unauthorized',
