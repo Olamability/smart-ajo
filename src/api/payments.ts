@@ -19,6 +19,7 @@ interface VerifyPaymentResponse {
   verified: boolean;
   amount: number;
   message: string;
+  position?: number; // Position assigned to user in group (for group_creation/join payments)
   data?: {
     reference: string;
     amount: number;
@@ -411,8 +412,10 @@ export const verifyPayment = async (
 };
 
 /**
- * Process group creation payment after verification
- * Activates the creator as a member after payment is verified
+ * DEPRECATED: Process group creation payment after verification
+ * This function is no longer needed - the verify-payment Edge Function now handles all business logic.
+ * Kept for backward compatibility only.
+ * @deprecated Use verifyPayment() instead - it handles everything on the backend.
  */
 export const processGroupCreationPayment = async (
   reference: string,
@@ -459,8 +462,10 @@ export const processGroupCreationPayment = async (
 };
 
 /**
- * Process group join payment after verification
- * Adds the member to the group after payment is verified
+ * DEPRECATED: Process group join payment after verification
+ * This function is no longer needed - the verify-payment Edge Function now handles all business logic.
+ * Kept for backward compatibility only.
+ * @deprecated Use verifyPayment() instead - it handles everything on the backend.
  */
 export const processGroupJoinPayment = async (
   reference: string,
@@ -506,8 +511,10 @@ export const processGroupJoinPayment = async (
 };
 
 /**
- * Process group join payment after admin approval
- * Adds the member to the group after payment is verified (for approved join requests)
+ * DEPRECATED: Process group join payment after admin approval
+ * This function is no longer needed - the verify-payment Edge Function now handles all business logic.
+ * Kept for backward compatibility only.
+ * @deprecated Use verifyPayment() instead - it handles everything on the backend.
  */
 export const processApprovedJoinPayment = async (
   reference: string,
@@ -553,8 +560,10 @@ export const processApprovedJoinPayment = async (
 };
 
 /**
- * Poll payment status from database
- * Used as a fallback when Edge Function verification has issues
+ * DEPRECATED: Poll payment status from database
+ * This function is no longer needed - payment verification should only happen via the Edge Function.
+ * Polling creates race conditions and should not be used.
+ * @deprecated Do not use polling - rely on verify-payment Edge Function only.
  */
 export const pollPaymentStatus = async (
   reference: string,
