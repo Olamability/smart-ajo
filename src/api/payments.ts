@@ -239,14 +239,13 @@ export const verifyPayment = async (
   
   console.log('Session valid. Token length:', activeSession.access_token.length);
   
-  // CRITICAL FIX: Recreate the Supabase client after session refresh
-  // The original client was created before the session refresh, so it won't
-  // automatically use the refreshed token. The createClient() function from
-  // @supabase/ssr creates a new client that reads the current session state.
-  // Since we just called refreshSession(), the new client will pick up the
-  // fresh session with the updated access token.
-  console.log('Creating new Supabase client to use refreshed session...');
-  const freshSupabase = createClient();
+  // CRITICAL FIX: Instead of relying on automatic session propagation,
+  // explicitly pass the access token in the Authorization header.
+  // This ensures the Edge Function receives the fresh token immediately,
+  // avoiding race conditions with session storage updates.
+  console.log('Preparing to call Edge Function with explicit token...');
+  const accessToken = activeSession.access_token;
+  console.log('Access token available:', !!accessToken, 'Length:', accessToken.length);
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -260,10 +259,14 @@ export const verifyPayment = async (
       }
 
       // Call the verify-payment Edge Function
-      // Using the fresh client which has the updated session token
-      console.log('Calling Edge Function with refreshed session...');
-      const { data, error } = await freshSupabase.functions.invoke('verify-payment', {
+      // IMPORTANT: Explicitly pass the Authorization header with the fresh token
+      // to avoid relying on automatic session propagation which can have timing issues
+      console.log('Calling Edge Function with explicit authorization...');
+      const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
 
       console.log('Edge Function response received:', { 
@@ -306,23 +309,34 @@ export const verifyPayment = async (
                            error.message.includes('Authentication');
         
         if (isAuthError) {
-          console.error('Authentication error detected after proactive session refresh');
-          console.error('This could indicate: session refresh failed, backend auth issue, or invalid token');
-          console.error('Auth error context:', { 
+          console.error('Authentication error detected despite explicit token passing');
+          console.error('This indicates either:');
+          console.error('  1. The refreshed token is invalid or expired');
+          console.error('  2. Backend auth service is unavailable');
+          console.error('  3. Token was not properly extracted from request');
+          console.error('Auth error details:', { 
             errorMessage: error.message,
             statusCode,
             attempt,
-            hasContext: !!errorContext 
+            hasContext: !!errorContext,
+            tokenProvided: !!accessToken,
+            tokenLength: accessToken?.length || 0
           });
-          // Since we already attempted to refresh the session at the start, this is likely a genuine auth issue
-          // However, it could also be due to network issues during refresh or backend problems
+          
+          // Log session details for debugging (non-PII)
+          console.error('Session state:', {
+            hasSession: !!activeSession,
+            expiresAt: activeSession.expires_at ? new Date(activeSession.expires_at * 1000).toISOString() : 'unknown',
+            isExpired: activeSession.expires_at ? activeSession.expires_at < Date.now() / 1000 : true
+          });
+          
           return {
             success: false,
             payment_status: 'unauthorized',
             verified: false,
             amount: 0,
-            message: 'Your session has expired. Please log out and log in again, then try the payment.',
-            error: 'Authentication failed',
+            message: 'Authentication failed during payment verification. Please log out, log in again, and retry the payment.',
+            error: 'Authentication failed - token validation error',
           };
         }
         

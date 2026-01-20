@@ -760,11 +760,13 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     console.log('=== AUTH CHECK START ===');
     console.log('Authorization header present:', !!authHeader);
+    console.log('Authorization header format valid:', authHeader?.startsWith('Bearer ') || false);
     console.log('Timestamp:', new Date().toISOString());
     
     if (!authHeader) {
-      console.error('Missing authorization header');
-      console.error('Request headers:', Array.from(req.headers.entries()).map(([k]) => k).join(', '));
+      console.error('CRITICAL: Missing authorization header');
+      console.error('Available request headers:', Array.from(req.headers.entries()).map(([k]) => k).join(', '));
+      console.error('This suggests the frontend did not pass the Authorization header');
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
