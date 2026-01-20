@@ -274,8 +274,15 @@ export const verifyPayment = async (
                            (error as any).context?.status === 401;
         
         if (isAuthError) {
-          console.error('Authentication error detected - this should not happen after proactive session refresh');
-          // Since we already refreshed the session at the start, this is a genuine auth issue
+          console.error('Authentication error detected after proactive session refresh');
+          console.error('This could indicate: session refresh failed, backend auth issue, or invalid token');
+          console.error('Auth error context:', { 
+            errorMessage: error.message,
+            attempt,
+            hasContext: !!(error as any).context 
+          });
+          // Since we already attempted to refresh the session at the start, this is likely a genuine auth issue
+          // However, it could also be due to network issues during refresh or backend problems
           return {
             success: false,
             payment_status: 'unauthorized',
