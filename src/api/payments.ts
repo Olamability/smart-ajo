@@ -283,9 +283,11 @@ export const verifyPayment = async (
         const statusCode = errorContext?.status;
         
         // Check if edge function doesn't exist (404 Not Found)
-        if (statusCode === 404 || error.message.includes('404') || error.message.includes('not found')) {
+        if (statusCode === 404 || 
+            error.message.includes('404') || 
+            error.message.toLowerCase().includes('not found')) {
           console.error('Edge Function not found - verify-payment may not be deployed');
-          console.error('Please ensure the edge function is deployed using: ./deploy-edge-functions.sh verify-payment');
+          console.error('Deployment required: Ensure edge functions are deployed to Supabase');
           return {
             success: false,
             payment_status: 'service_unavailable',
