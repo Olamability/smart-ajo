@@ -227,7 +227,7 @@ export const verifyPayment = async (
   }
   
   // Don't log PII in production
-  if (import.meta.env.MODE === 'development') {
+  if (import.meta.env.DEV) {
     console.log('User authenticated:', user.id);
     console.log('User email:', user.email);
     console.log('Token expires at:', new Date(activeSession.expires_at! * 1000).toISOString());
