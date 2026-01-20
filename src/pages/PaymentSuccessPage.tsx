@@ -9,11 +9,23 @@ import { toast } from 'sonner';
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
 
+/**
+ * PaymentSuccessPage - Callback URL page for payment redirects
+ * 
+ * This page is ONLY responsible for:
+ * 1. Receiving the payment callback from Paystack
+ * 2. Calling the backend verify-payment Edge Function
+ * 3. Displaying the verification result
+ * 
+ * NO BUSINESS LOGIC is executed here. All business logic (adding members,
+ * creating contributions, etc.) happens in the backend Edge Function.
+ */
 export default function PaymentSuccessPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
+  const [memberPosition, setMemberPosition] = useState<number | null>(null);
   
   // Get payment reference and group ID from URL query params
   // Paystack may send either 'reference' or 'trxref' depending on callback configuration
@@ -35,15 +47,18 @@ export default function PaymentSuccessPage() {
     }
 
     try {
+      // Call backend verify-payment Edge Function
+      // This does ALL the work: verification + business logic
       const result = await verifyPayment(reference);
       
       if (result.verified && result.success) {
         setVerificationStatus('verified');
-        setVerificationMessage('Payment verified successfully!');
+        setVerificationMessage(result.message || 'Payment verified successfully!');
+        setMemberPosition(result.position || null);
         toast.success('Payment verified! Your transaction is complete.');
       } else {
         setVerificationStatus('failed');
-        setVerificationMessage(result.message || 'Payment verification failed');
+        setVerificationMessage(result.message || result.error || 'Payment verification failed');
         toast.error(result.message || 'Payment verification failed');
       }
     } catch (error) {
@@ -111,13 +126,17 @@ export default function PaymentSuccessPage() {
           {/* Status Message */}
           {verificationStatus === 'verifying' && (
             <p className="text-sm text-muted-foreground text-center">
-              Please wait while we verify your payment with our payment provider...
+              Please wait while we verify your payment and process your membership...
             </p>
           )}
           {verificationStatus === 'verified' && (
-            <p className="text-sm text-muted-foreground text-center">
-              Thank you! Your transaction has been verified and processed successfully.
-            </p>
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                {memberPosition 
+                  ? `Thank you! Your transaction has been verified and you have been added to the group at position ${memberPosition}.`
+                  : 'Thank you! Your transaction has been verified and processed successfully.'}
+              </p>
+            </>
           )}
           {verificationStatus === 'failed' && (
             <Alert variant="destructive">

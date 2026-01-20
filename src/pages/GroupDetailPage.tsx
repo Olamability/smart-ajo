@@ -401,30 +401,6 @@ export default function GroupDetailPage() {
             setIsProcessingPayment(false);
           }
         },
-                  } else if (verifyResult.payment_status === 'failed') {
-                    errorMessage = 'Payment was declined by your bank. Please try again.';
-                  } else if (verifyResult.error) {
-                    errorMessage = `Verification error: ${verifyResult.error}. Reference: ${response.reference}`;
-                  } else {
-                    errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
-                  }
-                  
-                  toast.error(errorMessage, { duration: 10000 });
-                }
-              }
-            } else {
-              toast.error('Payment was not successful');
-            }
-          } catch (error) {
-            console.error('Error in payment callback:', error);
-            toast.error(
-              'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
-              { duration: 10000 }
-            );
-          } finally {
-            setIsProcessingPayment(false);
-          }
-        },
         onClose: () => {
           toast.info('Payment cancelled');
           setIsProcessingPayment(false);
