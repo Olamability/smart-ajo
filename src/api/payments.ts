@@ -166,42 +166,62 @@ export const verifyPayment = async (
   // This is critical for payment flows where the user might have been away from the app
   // (e.g., completing payment on Paystack) and their session may have expired
   console.log('Proactively refreshing session before verification...');
+  
+  // First, get the current session
+  const { data: { session: currentSession } } = await supabase.auth.getSession();
+  
+  if (!currentSession?.access_token) {
+    console.error('No active session found before refresh attempt');
+    return {
+      success: false,
+      payment_status: 'unauthorized',
+      verified: false,
+      amount: 0,
+      message: 'Your session has expired. Please log in again to verify your payment.',
+      error: 'Session expired - please log in again',
+    };
+  }
+  
+  // Try to refresh the session
   const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
   
+  let activeSession = currentSession; // Start with current session
+  
   if (refreshError || !refreshData.session) {
-    console.error('Failed to refresh session:', refreshError?.message || 'No session returned');
+    console.warn('Session refresh failed:', refreshError?.message || 'No session returned');
+    console.log('Will attempt to use current session if still valid');
     
-    // Try to get the current session as fallback
-    const { data: { session: fallbackSession } } = await supabase.auth.getSession();
-    
-    if (!fallbackSession?.access_token) {
-      console.error('No valid session available');
+    // Check if current session is still valid (not expired)
+    if (currentSession.expires_at && currentSession.expires_at * 1000 < Date.now()) {
+      console.error('Current session has expired and refresh failed');
       return {
         success: false,
         payment_status: 'unauthorized',
         verified: false,
         amount: 0,
         message: 'Your session has expired. Please log out and log in again, then try the payment.',
-        error: 'Session expired - please log in again',
+        error: 'Session expired and refresh failed',
       };
     }
     
-    console.log('Using fallback session (refresh failed but session still exists)');
+    // Current session is still valid, continue with it
+    console.log('Current session is still valid, will use it');
   } else {
     console.log('Session refreshed successfully');
+    activeSession = refreshData.session;
   }
   
-  // Get the current user to verify authentication
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  // Verify we have a valid user with the active session
+  const { data: { user }, error: userError } = await supabase.auth.getUser(activeSession.access_token);
   
   if (userError || !user) {
-    console.error('User authentication failed:', userError?.message || 'No user found');
+    console.error('User authentication failed with active session:', userError?.message || 'No user found');
     return {
       success: false,
       payment_status: 'unauthorized',
       verified: false,
       amount: 0,
-      message: 'Authentication required. Please log in again.',
+      message: 'Authentication failed. Please log in again.',
       error: userError?.message || 'No authenticated user',
     };
   }
@@ -210,29 +230,13 @@ export const verifyPayment = async (
   if (import.meta.env.DEV) {
     console.log('User authenticated:', user.id);
     console.log('User email:', user.email);
+    console.log('Token expires at:', new Date(activeSession.expires_at! * 1000).toISOString());
   } else {
     console.log('User authenticated successfully');
+    console.log('Session valid until:', new Date(activeSession.expires_at! * 1000).toISOString());
   }
   
-  // Get the fresh session (should be available after refresh)
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  if (!session?.access_token) {
-    console.error('No active session found after refresh and user verification');
-    return {
-      success: false,
-      payment_status: 'unauthorized',
-      verified: false,
-      amount: 0,
-      message: 'Session expired. Please log in again.',
-      error: 'No active session',
-    };
-  }
-  
-  console.log('Session valid. Token length:', session.access_token.length);
-  if (import.meta.env.DEV) {
-    console.log('Session expires at:', new Date(session.expires_at! * 1000).toISOString());
-  }
+  console.log('Session valid. Token length:', activeSession.access_token.length);
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -250,7 +254,7 @@ export const verifyPayment = async (
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${activeSession.access_token}`,
         },
       });
 

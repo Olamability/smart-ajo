@@ -764,10 +764,12 @@ serve(async (req) => {
     
     if (!authHeader) {
       console.error('Missing authorization header');
+      console.error('Request headers:', Array.from(req.headers.entries()).map(([k]) => k).join(', '));
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
           message: 'Authentication required. Please ensure you are logged in.',
+          details: 'No Authorization header provided in request',
         }),
         {
           status: 401,
@@ -799,19 +801,30 @@ serve(async (req) => {
 
     // Extract JWT token from Authorization header
     const jwt = authHeader.replace('Bearer ', '');
-    console.log('JWT token length:', jwt.length);
+    console.log('JWT token extracted. Length:', jwt.length);
     
-    // Only log token preview in development/debug mode (not in production)
-    const isDebugMode = Deno.env.get('DEBUG_MODE') === 'true';
-    if (isDebugMode) {
-      console.log('JWT token preview:', jwt.substring(0, 20) + '...' + jwt.substring(jwt.length - 20));
+    // Basic JWT format validation
+    if (!jwt || jwt.length < 20 || !jwt.includes('.')) {
+      console.error('Invalid JWT format detected');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Unauthorized',
+          message: 'Invalid authentication token format.',
+          details: 'Token does not appear to be a valid JWT',
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
     
-    // Verify the JWT token is valid with more detailed error handling
+    // Verify the JWT token is valid with detailed error handling
     let user;
     let authError;
     
     try {
+      console.log('Verifying JWT with Supabase auth...');
       const result = await supabase.auth.getUser(jwt);
       user = result.data?.user;
       authError = result.error;
@@ -820,10 +833,16 @@ serve(async (req) => {
         hasUser: !!user,
         hasError: !!authError,
         errorMessage: authError?.message,
+        errorStatus: authError?.status,
         userId: user?.id
       });
     } catch (err) {
       console.error('Exception during auth verification:', err);
+      console.error('Exception details:', {
+        name: err?.name,
+        message: err?.message,
+        stack: err?.stack?.substring(0, 200)
+      });
       authError = { message: 'Auth verification exception', details: err };
     }
     
@@ -833,12 +852,24 @@ serve(async (req) => {
       console.error('Auth error details:', JSON.stringify(authError, null, 2));
       console.error('=== AUTH CHECK FAILED ===');
       
+      // Provide more specific error messages based on the error
+      let errorMessage = 'Invalid or expired authentication token. Please log in again.';
+      let errorDetails = 'Authentication verification failed. Your session may have expired.';
+      
+      if (authError?.message?.toLowerCase().includes('expired')) {
+        errorMessage = 'Your session has expired. Please log in again.';
+        errorDetails = 'JWT token has expired';
+      } else if (authError?.message?.toLowerCase().includes('invalid')) {
+        errorMessage = 'Invalid authentication token. Please log in again.';
+        errorDetails = 'JWT token is invalid or malformed';
+      }
+      
       // Return generic error to client (don't expose auth details)
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
-          message: 'Invalid or expired authentication token. Please log in again.',
-          details: 'Authentication verification failed. Your session may have expired.'
+          message: errorMessage,
+          details: errorDetails,
         }),
         {
           status: 401,
@@ -848,10 +879,6 @@ serve(async (req) => {
     }
 
     console.log(`Request from authenticated user: ${user.id}`);
-    // Only log email in debug mode
-    if (isDebugMode) {
-      console.log('User email:', user.email);
-    }
     console.log('=== AUTH CHECK PASSED ===');
 
     // Get Paystack secret key
