@@ -42,7 +42,7 @@ export default function PaymentSuccessPage() {
     setVerificationStatus('verifying');
     
     // Only log in development
-    if (import.meta.env.DEV) {
+    if (import.meta.env.MODE === 'development') {
       console.log('Verifying payment with reference:', reference);
     }
 
@@ -62,7 +62,7 @@ export default function PaymentSuccessPage() {
         toast.error(result.message || 'Payment verification failed');
       }
     } catch (error) {
-      if (import.meta.env.DEV) {
+      if (import.meta.env.MODE === 'development') {
         console.error('Verification error:', error);
       }
       setVerificationStatus('failed');
