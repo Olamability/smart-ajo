@@ -1200,6 +1200,31 @@ COMMENT ON FUNCTION process_group_creation_payment IS
 GRANT EXECUTE ON FUNCTION process_group_creation_payment TO authenticated;
 
 -- ============================================================================
+-- FUNCTION: increment_group_member_count
+-- ============================================================================
+-- Atomically increments the group's current_members count
+-- This prevents race conditions when multiple payments are processed simultaneously
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION increment_group_member_count(
+  p_group_id UUID
+)
+RETURNS VOID AS $$
+BEGIN
+  -- Atomic increment to avoid race conditions
+  UPDATE groups
+  SET current_members = current_members + 1,
+      updated_at = NOW()
+  WHERE id = p_group_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION increment_group_member_count IS 
+  'Atomically increments group member count to prevent race conditions';
+
+GRANT EXECUTE ON FUNCTION increment_group_member_count TO service_role;
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --

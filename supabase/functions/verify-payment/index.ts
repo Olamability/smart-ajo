@@ -382,6 +382,126 @@ async function processSecurityDeposit(
 }
 
 /**
+ * Helper function to create first contribution record
+ */
+async function createFirstContribution(
+  supabase: any,
+  groupId: string,
+  userId: string,
+  amount: number,
+  reference: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('contributions')
+    .insert({
+      group_id: groupId,
+      user_id: userId,
+      amount: amount,
+      cycle_number: 1,
+      status: 'paid',
+      due_date: new Date().toISOString(),
+      paid_date: new Date().toISOString(),
+      transaction_ref: reference,
+    });
+
+  if (error) {
+    console.error('Failed to create contribution:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Helper function to create payment transaction records
+ */
+async function createPaymentTransactions(
+  supabase: any,
+  groupId: string,
+  userId: string,
+  reference: string,
+  securityDepositAmount: number,
+  contributionAmount: number,
+  isCreator: boolean
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('transactions')
+    .insert([
+      {
+        user_id: userId,
+        group_id: groupId,
+        type: 'security_deposit',
+        amount: securityDepositAmount,
+        status: 'completed',
+        reference: reference + '_SD',
+        description: isCreator ? 'Security deposit for group creation' : 'Security deposit for joining group',
+        completed_at: new Date().toISOString(),
+      },
+      {
+        user_id: userId,
+        group_id: groupId,
+        type: 'contribution',
+        amount: contributionAmount,
+        status: 'completed',
+        reference: reference + '_C1',
+        description: 'First contribution payment',
+        completed_at: new Date().toISOString(),
+      },
+    ]);
+
+  if (error) {
+    console.error('Failed to create transactions:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Helper function to increment group member count
+ * Uses RPC function for atomic increment to avoid race conditions
+ */
+async function incrementGroupMemberCount(
+  supabase: any,
+  groupId: string
+): Promise<boolean> {
+  // Use atomic increment via SQL to avoid race conditions
+  const { error } = await supabase.rpc('increment_group_member_count', {
+    p_group_id: groupId
+  });
+
+  if (error) {
+    console.error('Failed to increment member count:', error);
+    // Fallback to manual update if RPC doesn't exist
+    const { error: updateError } = await supabase
+      .from('groups')
+      .update({
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', groupId)
+      .select('current_members')
+      .single()
+      .then(async ({ data: group }: any) => {
+        if (group) {
+          return await supabase
+            .from('groups')
+            .update({
+              current_members: group.current_members + 1,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', groupId)
+            .eq('current_members', group.current_members); // Optimistic locking
+        }
+        return { error: null };
+      });
+    
+    if (updateError) {
+      console.error('Fallback update also failed:', updateError);
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Process group creation payment
  * Activates creator as member after payment is verified
  */
@@ -457,66 +577,22 @@ async function processGroupCreationPayment(
     return { success: false, message: 'Failed to add member to group' };
   }
 
-  // Create the first contribution record
-  const { error: contribError } = await supabase
-    .from('contributions')
-    .insert({
-      group_id: groupId,
-      user_id: userId,
-      amount: group.contribution_amount,
-      cycle_number: 1,
-      status: 'paid',
-      due_date: new Date().toISOString(),
-      paid_date: new Date().toISOString(),
-      transaction_ref: reference,
-    });
+  // Create first contribution record using helper
+  await createFirstContribution(supabase, groupId, userId, group.contribution_amount, reference);
 
-  if (contribError) {
-    console.error('Failed to create contribution:', contribError);
-  }
+  // Create transaction records using helper
+  await createPaymentTransactions(
+    supabase,
+    groupId,
+    userId,
+    reference,
+    group.security_deposit_amount,
+    group.contribution_amount,
+    true // isCreator
+  );
 
-  // Create transaction records
-  const { error: txError } = await supabase
-    .from('transactions')
-    .insert([
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'security_deposit',
-        amount: group.security_deposit_amount,
-        status: 'completed',
-        reference: reference + '_SD',
-        description: 'Security deposit for group creation',
-        completed_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'contribution',
-        amount: group.contribution_amount,
-        status: 'completed',
-        reference: reference + '_C1',
-        description: 'First contribution payment',
-        completed_at: new Date().toISOString(),
-      },
-    ]);
-
-  if (txError) {
-    console.error('Failed to create transactions:', txError);
-  }
-
-  // Update group's current_members count
-  const { error: groupUpdateError } = await supabase
-    .from('groups')
-    .update({
-      current_members: supabase.raw('current_members + 1'),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', groupId);
-
-  if (groupUpdateError) {
-    console.error('Failed to update group member count:', groupUpdateError);
-  }
+  // Increment group member count using atomic operation
+  await incrementGroupMemberCount(supabase, groupId);
 
   console.log('Group creation payment processed successfully');
   return {
@@ -630,66 +706,22 @@ async function processGroupJoinPayment(
     return { success: false, message: 'Failed to add member to group' };
   }
 
-  // Create the first contribution record
-  const { error: contribError } = await supabase
-    .from('contributions')
-    .insert({
-      group_id: groupId,
-      user_id: userId,
-      amount: group.contribution_amount,
-      cycle_number: 1,
-      status: 'paid',
-      due_date: new Date().toISOString(),
-      paid_date: new Date().toISOString(),
-      transaction_ref: reference,
-    });
+  // Create first contribution record using helper
+  await createFirstContribution(supabase, groupId, userId, group.contribution_amount, reference);
 
-  if (contribError) {
-    console.error('Failed to create contribution:', contribError);
-  }
+  // Create transaction records using helper
+  await createPaymentTransactions(
+    supabase,
+    groupId,
+    userId,
+    reference,
+    group.security_deposit_amount,
+    group.contribution_amount,
+    false // isCreator
+  );
 
-  // Create transaction records
-  const { error: txError } = await supabase
-    .from('transactions')
-    .insert([
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'security_deposit',
-        amount: group.security_deposit_amount,
-        status: 'completed',
-        reference: reference + '_SD',
-        description: 'Security deposit for joining group',
-        completed_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'contribution',
-        amount: group.contribution_amount,
-        status: 'completed',
-        reference: reference + '_C1',
-        description: 'First contribution payment',
-        completed_at: new Date().toISOString(),
-      },
-    ]);
-
-  if (txError) {
-    console.error('Failed to create transactions:', txError);
-  }
-
-  // Update group's current_members count
-  const { error: groupUpdateError } = await supabase
-    .from('groups')
-    .update({
-      current_members: supabase.raw('current_members + 1'),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', groupId);
-
-  if (groupUpdateError) {
-    console.error('Failed to update group member count:', groupUpdateError);
-  }
+  // Increment group member count using atomic operation
+  await incrementGroupMemberCount(supabase, groupId);
 
   // If this was an approved join request, update the join request status
   const { error: joinReqError } = await supabase
