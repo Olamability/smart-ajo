@@ -239,6 +239,15 @@ export const verifyPayment = async (
   
   console.log('Session valid. Token length:', activeSession.access_token.length);
   
+  // CRITICAL FIX: Recreate the Supabase client after session refresh
+  // The original client was created before the session refresh, so it won't
+  // automatically use the refreshed token. The createClient() function from
+  // @supabase/ssr creates a new client that reads the current session state.
+  // Since we just called refreshSession(), the new client will pick up the
+  // fresh session with the updated access token.
+  console.log('Creating new Supabase client to use refreshed session...');
+  const freshSupabase = createClient();
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`Verification attempt ${attempt}/${retries} for reference: ${reference}`);
@@ -251,9 +260,9 @@ export const verifyPayment = async (
       }
 
       // Call the verify-payment Edge Function
-      // Note: Supabase client automatically includes Authorization header from active session
-      console.log('Calling Edge Function...');
-      const { data, error } = await supabase.functions.invoke('verify-payment', {
+      // Using the fresh client which has the updated session token
+      console.log('Calling Edge Function with refreshed session...');
+      const { data, error } = await freshSupabase.functions.invoke('verify-payment', {
         body: { reference },
       });
 
@@ -269,20 +278,41 @@ export const verifyPayment = async (
         console.error('Error details:', JSON.stringify(error, null, 2));
         lastError = error.message;
         
+        // Best Practice: Check for specific error types with context
+        const errorContext = (error as any).context;
+        const statusCode = errorContext?.status;
+        
+        // Check if edge function doesn't exist (404 Not Found)
+        if (statusCode === 404 || 
+            error.message.includes('404') || 
+            error.message.toLowerCase().includes('not found')) {
+          console.error('Edge Function not found - verify-payment may not be deployed');
+          console.error('Deployment required: Ensure edge functions are deployed to Supabase');
+          return {
+            success: false,
+            payment_status: 'service_unavailable',
+            verified: false,
+            amount: 0,
+            message: 'Payment verification service is not available. Please contact support.',
+            error: 'Edge Function not deployed',
+          };
+        }
+        
         // Check if it's a 401 authentication error using context if available
         // FunctionsHttpError may have context.status
-        const isAuthError = error.message.includes('401') || 
+        const isAuthError = statusCode === 401 ||
+                           error.message.includes('401') || 
                            error.message.includes('Unauthorized') ||
-                           error.message.includes('Authentication') ||
-                           (error as any).context?.status === 401;
+                           error.message.includes('Authentication');
         
         if (isAuthError) {
           console.error('Authentication error detected after proactive session refresh');
           console.error('This could indicate: session refresh failed, backend auth issue, or invalid token');
           console.error('Auth error context:', { 
             errorMessage: error.message,
+            statusCode,
             attempt,
-            hasContext: !!(error as any).context 
+            hasContext: !!errorContext 
           });
           // Since we already attempted to refresh the session at the start, this is likely a genuine auth issue
           // However, it could also be due to network issues during refresh or backend problems
@@ -293,6 +323,23 @@ export const verifyPayment = async (
             amount: 0,
             message: 'Your session has expired. Please log out and log in again, then try the payment.',
             error: 'Authentication failed',
+          };
+        }
+        
+        // Check for server errors (500, 502, 503, 504)
+        if (statusCode && statusCode >= 500) {
+          console.error(`Server error detected (${statusCode}). Edge function may be experiencing issues.`);
+          if (attempt < retries) {
+            console.log('Server error - will retry...');
+            continue;
+          }
+          return {
+            success: false,
+            payment_status: 'service_error',
+            verified: false,
+            amount: 0,
+            message: 'Payment verification service is temporarily unavailable. Please try again in a few moments.',
+            error: `Server error: ${statusCode}`,
           };
         }
         
