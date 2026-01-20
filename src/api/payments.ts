@@ -241,10 +241,12 @@ export const verifyPayment = async (
   
   // CRITICAL FIX: Recreate the Supabase client after session refresh
   // The original client was created before the session refresh, so it won't
-  // automatically use the refreshed token. We need to create a fresh client
-  // that will pick up the newly refreshed session from browser storage.
-  console.log('Recreating Supabase client to use refreshed session...');
-  const refreshedSupabase = createClient();
+  // automatically use the refreshed token. The createClient() function from
+  // @supabase/ssr creates a new client that reads the current session state.
+  // Since we just called refreshSession(), the new client will pick up the
+  // fresh session with the updated access token.
+  console.log('Creating new Supabase client to use refreshed session...');
+  const freshSupabase = createClient();
   
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
@@ -258,9 +260,9 @@ export const verifyPayment = async (
       }
 
       // Call the verify-payment Edge Function
-      // Using the refreshed client which has the updated session token
+      // Using the fresh client which has the updated session token
       console.log('Calling Edge Function with refreshed session...');
-      const { data, error } = await refreshedSupabase.functions.invoke('verify-payment', {
+      const { data, error } = await freshSupabase.functions.invoke('verify-payment', {
         body: { reference },
       });
 
