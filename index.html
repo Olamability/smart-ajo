@@ -48,6 +48,12 @@
 
     <!-- Security Headers -->
     <meta name="referrer" content="strict-origin-when-cross-origin" />
+    
+    <!-- Content Security Policy -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://*.paystack.co https://checkout.paystack.com; script-src-elem 'self' 'unsafe-inline' https://js.paystack.co https://*.paystack.co https://checkout.paystack.com; style-src 'self' 'unsafe-inline' https://paystack.com https://*.paystack.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://api.paystack.co https://*.paystack.co wss://*.supabase.co; frame-src 'self' https://checkout.paystack.com https://*.paystack.com; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
 
     <!-- Theme Color -->
     <meta name="theme-color" content="#1e7d6e" />
