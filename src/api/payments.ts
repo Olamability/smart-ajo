@@ -239,6 +239,13 @@ export const verifyPayment = async (
   
   console.log('Session valid. Token length:', activeSession.access_token.length);
   
+  // CRITICAL FIX: Recreate the Supabase client after session refresh
+  // The original client was created before the session refresh, so it won't
+  // automatically use the refreshed token. We need to create a fresh client
+  // that will pick up the newly refreshed session from browser storage.
+  console.log('Recreating Supabase client to use refreshed session...');
+  const refreshedSupabase = createClient();
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`Verification attempt ${attempt}/${retries} for reference: ${reference}`);
@@ -251,9 +258,9 @@ export const verifyPayment = async (
       }
 
       // Call the verify-payment Edge Function
-      // Note: Supabase client automatically includes Authorization header from active session
-      console.log('Calling Edge Function...');
-      const { data, error } = await supabase.functions.invoke('verify-payment', {
+      // Using the refreshed client which has the updated session token
+      console.log('Calling Edge Function with refreshed session...');
+      const { data, error } = await refreshedSupabase.functions.invoke('verify-payment', {
         body: { reference },
       });
 
