@@ -16,11 +16,13 @@
 
 -- Drop the old function signature if it exists to avoid conflicts
 DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID);
+DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID, INTEGER);
 
 CREATE OR REPLACE FUNCTION process_group_creation_payment(
   p_payment_reference VARCHAR(255),
   p_group_id UUID,
-  p_user_id UUID
+  p_user_id UUID,
+  p_preferred_slot INTEGER DEFAULT 1
 )
 RETURNS TABLE(success BOOLEAN, error_message TEXT) AS $$
 DECLARE
@@ -80,33 +82,26 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Update member status to active and mark security deposit as paid
-  UPDATE group_members
-  SET 
-    status = 'active',
-    has_paid_security_deposit = TRUE,
-    security_deposit_amount = v_security_deposit_amount,
-    updated_at = NOW()
-  WHERE group_id = p_group_id AND user_id = p_user_id;
-
-  -- If no update happened, the creator wasn't added yet, so add them
-  IF NOT FOUND THEN
-    INSERT INTO group_members (
-      group_id,
-      user_id,
-      position,
-      status,
-      has_paid_security_deposit,
-      security_deposit_amount
-    ) VALUES (
-      p_group_id,
-      p_user_id,
-      1, -- Creator gets position 1
-      'active',
-      TRUE,
-      v_security_deposit_amount
-    );
-  END IF;
+  -- Add creator as member with selected slot position
+  INSERT INTO group_members (
+    group_id,
+    user_id,
+    position,
+    status,
+    has_paid_security_deposit,
+    security_deposit_amount,
+    security_deposit_paid_at,
+    is_creator
+  ) VALUES (
+    p_group_id,
+    p_user_id,
+    p_preferred_slot,
+    'active',
+    TRUE,
+    v_security_deposit_amount,
+    NOW(),
+    TRUE
+  );
 
   -- Create the first contribution record
   INSERT INTO contributions (
@@ -129,7 +124,7 @@ BEGIN
     p_payment_reference
   );
 
-  -- Create transaction record
+  -- Create transaction records
   INSERT INTO transactions (
     user_id,
     group_id,
@@ -138,7 +133,7 @@ BEGIN
     status,
     reference,
     description,
-    created_at
+    completed_at
   ) VALUES (
     p_user_id,
     p_group_id,
@@ -159,6 +154,12 @@ BEGIN
     NOW()
   );
 
+  -- Update group's current_members count
+  UPDATE groups
+  SET current_members = current_members + 1,
+      updated_at = NOW()
+  WHERE id = p_group_id;
+
   RETURN QUERY SELECT TRUE, 'Group creation payment processed successfully'::TEXT;
 
 EXCEPTION
@@ -169,7 +170,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 COMMENT ON FUNCTION process_group_creation_payment IS 
-  'Processes verified payment for group creation and activates creator as member';
+  'Processes verified payment for group creation and activates creator as member with selected slot';
 
 GRANT EXECUTE ON FUNCTION process_group_creation_payment TO authenticated;
 
