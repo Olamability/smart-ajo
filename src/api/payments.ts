@@ -192,7 +192,8 @@ export const verifyPayment = async (
     console.log('Will attempt to use current session if still valid');
     
     // Check if current session is still valid (not expired)
-    if (currentSession.expires_at && currentSession.expires_at * 1000 < Date.now()) {
+    // Supabase returns expires_at as a Unix timestamp in seconds
+    if (currentSession.expires_at && currentSession.expires_at < Date.now() / 1000) {
       console.error('Current session has expired and refresh failed');
       return {
         success: false,

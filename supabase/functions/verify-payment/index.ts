@@ -803,9 +803,9 @@ serve(async (req) => {
     const jwt = authHeader.replace('Bearer ', '');
     console.log('JWT token extracted. Length:', jwt.length);
     
-    // Basic JWT format validation
-    if (!jwt || jwt.length < 20 || !jwt.includes('.')) {
-      console.error('Invalid JWT format detected');
+    // JWT format validation - must have exactly 3 parts (header.payload.signature)
+    if (!jwt || jwt.length < 20 || jwt.split('.').length !== 3) {
+      console.error('Invalid JWT format detected. Parts:', jwt.split('.').length);
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
@@ -837,11 +837,12 @@ serve(async (req) => {
         userId: user?.id
       });
     } catch (err) {
+      const STACK_TRACE_LIMIT = 200;
       console.error('Exception during auth verification:', err);
       console.error('Exception details:', {
         name: err?.name,
         message: err?.message,
-        stack: err?.stack?.substring(0, 200)
+        stack: err?.stack?.substring(0, STACK_TRACE_LIMIT)
       });
       authError = { message: 'Auth verification exception', details: err };
     }
