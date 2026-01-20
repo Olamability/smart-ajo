@@ -37,7 +37,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paystack.co https://vercel.live; style-src 'self' 'unsafe-inline' https://*.paystack.co https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://api.paystack.co https://*.paystack.co wss://*.supabase.co https://vercel.live; frame-src 'self' https://*.paystack.co; object-src 'none'; base-uri 'self'; form-action 'self'"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paystack.co https://*.paystack.com https://vercel.live; style-src 'self' 'unsafe-inline' https://*.paystack.co https://*.paystack.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co https://api.paystack.co https://*.paystack.co https://*.paystack.com wss://*.supabase.co https://vercel.live; frame-src 'self' https://*.paystack.co https://*.paystack.com; object-src 'none'; base-uri 'self'; form-action 'self'"
         }
       ]
     }
