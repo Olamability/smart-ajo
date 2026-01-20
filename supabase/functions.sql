@@ -1043,6 +1043,10 @@ COMMENT ON FUNCTION get_group_progress IS
 -- Adds creator to group with selected slot position
 -- ============================================================================
 
+-- Drop old function signatures to avoid conflicts
+DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID);
+DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID, INTEGER);
+
 CREATE OR REPLACE FUNCTION process_group_creation_payment(
   p_payment_reference VARCHAR(255),
   p_group_id UUID,

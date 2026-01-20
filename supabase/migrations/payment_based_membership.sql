@@ -14,6 +14,9 @@
 -- Called after payment is verified to activate the creator as a member
 -- ============================================================================
 
+-- Drop the old function signature if it exists to avoid conflicts
+DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID);
+
 CREATE OR REPLACE FUNCTION process_group_creation_payment(
   p_payment_reference VARCHAR(255),
   p_group_id UUID,
