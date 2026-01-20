@@ -250,13 +250,11 @@ export const verifyPayment = async (
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
 
-      // Call the verify-payment Edge Function with explicit authorization header
+      // Call the verify-payment Edge Function
+      // Note: Supabase client automatically includes Authorization header from active session
       console.log('Calling Edge Function...');
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
-        headers: {
-          Authorization: `Bearer ${activeSession.access_token}`,
-        },
       });
 
       console.log('Edge Function response received:', { 
