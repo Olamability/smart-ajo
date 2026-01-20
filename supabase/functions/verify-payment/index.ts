@@ -800,9 +800,10 @@ serve(async (req) => {
       );
     }
 
-    // Extract JWT token from Authorization header
+    // Extract JWT token from Authorization header for format validation
+    // Note: We don't pass this to auth.getUser() - the client uses the header directly
     const jwt = authHeader.replace('Bearer ', '');
-    console.log('JWT token extracted. Length:', jwt.length);
+    console.log('JWT token extracted for validation. Length:', jwt.length);
     
     // JWT format validation - must have exactly 3 parts (header.payload.signature)
     if (!jwt || jwt.length < 20 || jwt.split('.').length !== 3) {
@@ -821,7 +822,7 @@ serve(async (req) => {
     }
 
     // Create a Supabase client with anon key and user JWT for authentication
-    // This is the correct way to verify user tokens in Edge Functions
+    // The client will use the Authorization header passed in global config
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
