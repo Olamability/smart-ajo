@@ -782,12 +782,14 @@ serve(async (req) => {
 
     // Get Supabase configuration
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     
     console.log('Supabase URL configured:', !!supabaseUrl);
+    console.log('Anon key configured:', !!supabaseAnonKey);
     console.log('Service key configured:', !!supabaseServiceKey);
     
-    if (!supabaseUrl || !supabaseServiceKey) {
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
       console.error('Supabase configuration missing');
       return new Response(
         JSON.stringify({ error: 'Server configuration error' }),
@@ -798,12 +800,10 @@ serve(async (req) => {
       );
     }
 
-    // Create a Supabase client with service role for auth verification
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Extract JWT token from Authorization header
+    // Extract JWT token from Authorization header for format validation
+    // Note: We don't pass this to auth.getUser() - the client uses the header directly
     const jwt = authHeader.replace('Bearer ', '');
-    console.log('JWT token extracted. Length:', jwt.length);
+    console.log('JWT token extracted for validation. Length:', jwt.length);
     
     // JWT format validation - must have exactly 3 parts (header.payload.signature)
     if (!jwt || jwt.length < 20 || jwt.split('.').length !== 3) {
@@ -820,6 +820,16 @@ serve(async (req) => {
         }
       );
     }
+
+    // Create a Supabase client with anon key and user JWT for authentication
+    // The client will use the Authorization header passed in global config
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
     
     // Verify the JWT token is valid with detailed error handling
     let user;
@@ -827,7 +837,8 @@ serve(async (req) => {
     
     try {
       console.log('Verifying JWT with Supabase auth...');
-      const result = await supabase.auth.getUser(jwt);
+      // Call getUser() without passing JWT - it will use the Authorization header
+      const result = await supabaseAuth.auth.getUser();
       user = result.data?.user;
       authError = result.error;
       
@@ -883,6 +894,11 @@ serve(async (req) => {
 
     console.log(`Request from authenticated user: ${user.id}`);
     console.log('=== AUTH CHECK PASSED ===');
+
+    // Create a separate Supabase client with service role for privileged database operations
+    // This client is used ONLY for database operations, not for authentication
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    console.log('Service role client created for database operations');
 
     // Get Paystack secret key
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');

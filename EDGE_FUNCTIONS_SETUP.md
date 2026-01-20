@@ -119,7 +119,14 @@ const response = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
 ```bash
 PAYSTACK_SECRET_KEY=sk_test_your_secret_key
 SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+**Note**: `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are automatically injected by Supabase. You need to manually set `SUPABASE_ANON_KEY` and `PAYSTACK_SECRET_KEY` as secrets:
+```bash
+supabase secrets set SUPABASE_ANON_KEY=your_anon_key_here
+supabase secrets set PAYSTACK_SECRET_KEY=sk_test_your_secret_key
 ```
 
 **Deployment**:
