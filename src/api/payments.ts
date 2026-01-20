@@ -2,7 +2,7 @@
  * Payment Verification API Service
  * 
  * Handles payment verification by calling the backend Edge Function.
- * This follows the mandatory verification flow from "Paystack steup.md":
+ * This follows the mandatory verification flow from "Paystack setup.md":
  * - Frontend initializes payment
  * - Frontend callback triggers verification request
  * - Backend verifies with Paystack API
