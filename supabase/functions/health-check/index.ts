@@ -131,7 +131,7 @@ async function checkAuth(): Promise<ComponentStatus> {
       clearTimeout(timeoutId);
       
       // Handle timeout
-      if (fetchError.name === 'AbortError') {
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
         const responseTime = Date.now() - startTime;
         return {
           status: 'down',
