@@ -1183,11 +1183,8 @@ BEGIN
     NOW()
   );
 
-  -- Update group's current_members count
-  UPDATE groups
-  SET current_members = current_members + 1,
-      updated_at = NOW()
-  WHERE id = p_group_id;
+  -- NOTE: The update_group_member_count trigger automatically increments current_members
+  -- when a member is inserted into group_members. No need to manually update to avoid double-counting.
 
   RETURN QUERY SELECT TRUE, 'Group creation payment processed successfully'::TEXT;
 
@@ -1199,7 +1196,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 COMMENT ON FUNCTION process_group_creation_payment IS 
-  'Processes verified payment for group creation and activates creator as member with selected slot';
+  'Processes verified payment for group creation and activates creator as member with selected slot. Trigger handles member count increment.';
 
 GRANT EXECUTE ON FUNCTION process_group_creation_payment TO authenticated;
 
