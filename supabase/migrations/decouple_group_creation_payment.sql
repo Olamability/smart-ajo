@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION add_member_to_group(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 ) 
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -263,7 +263,7 @@ CREATE OR REPLACE FUNCTION process_group_creation_payment(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -317,7 +317,7 @@ CREATE OR REPLACE FUNCTION process_group_join_payment(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
