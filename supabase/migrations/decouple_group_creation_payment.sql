@@ -299,7 +299,7 @@ BEGIN
 
   -- Get the member's position
   RETURN QUERY 
-  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position
+  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position AS member_position
   FROM group_members gm
   WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id;
 END;
@@ -353,7 +353,7 @@ BEGIN
 
   -- Get the member's position
   RETURN QUERY 
-  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position
+  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position AS member_position
   FROM group_members gm
   WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id;
 END;
