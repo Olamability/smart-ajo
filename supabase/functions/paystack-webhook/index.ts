@@ -716,12 +716,15 @@ async function processGroupJoinPayment(
     }
 
     // Check if the function returned success
-    if (addMemberResult && addMemberResult.length > 0) {
-      const result = addMemberResult[0];
-      if (!result.success) {
-        console.error('add_member_to_group failed:', result.error_message);
-        return { success: false, message: result.error_message || 'Failed to add user to group' };
-      }
+    if (!addMemberResult || addMemberResult.length === 0) {
+      console.error('add_member_to_group returned no result - unexpected behavior');
+      return { success: false, message: 'Failed to add user to group - no result returned' };
+    }
+    
+    const result = addMemberResult[0];
+    if (!result.success) {
+      console.error('add_member_to_group failed:', result.error_message);
+      return { success: false, message: result.error_message || 'Failed to add user to group' };
     }
 
     // Update the newly added member's payment status
@@ -754,6 +757,7 @@ async function processGroupJoinPayment(
       due_date: new Date().toISOString(),
       paid_date: new Date().toISOString(),
       transaction_ref: reference,
+      updated_at: new Date().toISOString(),
     }, {
       onConflict: 'group_id,user_id,cycle_number'
     });
