@@ -97,30 +97,51 @@ async function checkAuth(): Promise<ComponentStatus> {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     
-    // Check if we can reach the auth health endpoint
-    const response = await fetch(`${supabaseUrl}/auth/v1/health`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(5000), // 5 second timeout
-    });
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
     
-    const responseTime = Date.now() - startTime;
-    
-    if (!response.ok) {
+    try {
+      // Check if we can reach the auth health endpoint
+      const response = await fetch(`${supabaseUrl}/auth/v1/health`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      const responseTime = Date.now() - startTime;
+      
+      if (!response.ok) {
+        return {
+          status: 'degraded',
+          responseTime,
+          error: `Auth service returned ${response.status}`,
+        };
+      }
+      
       return {
-        status: 'degraded',
+        status: 'operational',
         responseTime,
-        error: `Auth service returned ${response.status}`,
+        message: 'Auth service is accessible',
       };
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      
+      // Handle timeout
+      if (fetchError.name === 'AbortError') {
+        const responseTime = Date.now() - startTime;
+        return {
+          status: 'down',
+          responseTime,
+          error: 'Auth service request timed out',
+        };
+      }
+      
+      throw fetchError;
     }
-    
-    return {
-      status: 'operational',
-      responseTime,
-      message: 'Auth service is accessible',
-    };
   } catch (error) {
     const responseTime = Date.now() - startTime;
     console.error('Auth health check failed:', error);
