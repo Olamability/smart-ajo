@@ -21,6 +21,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Constants
+const FIRST_CYCLE_NUMBER = 1;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -397,7 +400,7 @@ async function createFirstContribution(
       group_id: groupId,
       user_id: userId,
       amount: amount,
-      cycle_number: 1,
+      cycle_number: FIRST_CYCLE_NUMBER,
       status: 'paid',
       due_date: new Date().toISOString(),
       paid_date: new Date().toISOString(),
@@ -591,7 +594,7 @@ async function processGroupCreationPayment(
     })
     .eq('group_id', groupId)
     .eq('user_id', userId)
-    .eq('cycle_number', 1);
+    .eq('cycle_number', FIRST_CYCLE_NUMBER);
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
@@ -707,7 +710,7 @@ async function processGroupJoinPayment(
     })
     .eq('group_id', groupId)
     .eq('user_id', userId)
-    .eq('cycle_number', 1);
+    .eq('cycle_number', FIRST_CYCLE_NUMBER);
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
@@ -746,18 +749,6 @@ async function processGroupJoinPayment(
     success: true,
     message: 'Group join payment processed successfully',
     position: existingMember.position,
-  };
-}
-
-  if (joinReqError) {
-    console.error('Failed to update join request:', joinReqError);
-  }
-
-  console.log('Group join payment processed successfully');
-  return {
-    success: true,
-    message: 'Group join payment processed successfully',
-    position: position,
   };
 }
 
