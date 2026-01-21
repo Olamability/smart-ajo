@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getGroupById, 
@@ -79,6 +79,7 @@ export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +104,22 @@ export default function GroupDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Reload data when returning to the page (e.g., after payment)
+  // This effect runs when the location changes, ensuring fresh data after navigation
+  useEffect(() => {
+    if (id && location.state?.fromPayment) {
+      // Reload all data when returning from payment
+      loadGroupDetails();
+      loadMembers();
+      loadJoinRequests();
+      loadUserJoinRequestStatus();
+      
+      // Clear the state to avoid reloading on every render
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
 
   // Reload members data when page regains focus (e.g., after payment)
   useEffect(() => {
@@ -470,7 +487,7 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Status Alert - Show payment prompt for group creator who hasn't paid */}
-        {isCreator && !currentUserMember && group?.status === 'forming' && (
+        {isCreator && (!currentUserMember || !currentUserMember.securityDepositPaid) && group?.status === 'forming' && (
           <div className="space-y-4">
             <Alert className="bg-orange-50 border-orange-200">
               <AlertCircle className="h-4 w-4 text-orange-600" />
