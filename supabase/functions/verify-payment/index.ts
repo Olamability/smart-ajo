@@ -1,21 +1,35 @@
 /**
  * Payment Verification Edge Function
  * 
- * This function verifies payments with Paystack and updates the database.
- * It follows the mandatory verification flow from "Paystack steup.md":
+ * This function implements Paystack's mandatory verification flow:
  * 
- * 1. Backend MUST verify every payment using GET /transaction/verify/:reference
- * 2. Only after status = success AND verified = true, execute business logic
- * 3. Frontend success callback does NOT equal payment success
+ * ✅ WHAT THIS FUNCTION DOES:
+ * 1. Verifies payment with Paystack API using GET /transaction/verify/:reference
+ * 2. Stores payment record in the 'payments' table
+ * 3. Returns verification status to frontend
+ * 
+ * ❌ WHAT THIS FUNCTION DOES NOT DO:
+ * - Does NOT execute any business logic
+ * - Does NOT update contributions table
+ * - Does NOT update group_members table
+ * - Does NOT create transactions
+ * 
+ * 🔄 WHERE BUSINESS LOGIC HAPPENS:
+ * ALL business logic is executed exclusively in the paystack-webhook function.
+ * The webhook is the single source of truth for payment processing because:
+ * - Webhook is guaranteed to be called by Paystack even if user closes browser
+ * - Webhook prevents race conditions and duplicate processing
+ * - Webhook ensures payments are processed even if network fails during frontend callback
  * 
  * Security:
  * - Uses Paystack SECRET key (never exposed to frontend)
- * - Service role for database updates
+ * - Requires user authentication
  * - Idempotent (safe to call multiple times)
  * 
  * Usage:
  * POST /verify-payment
  * Body: { "reference": "payment_reference" }
+ * Headers: { "Authorization": "Bearer <user_token>" }
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -228,585 +242,6 @@ async function storePaymentRecord(
  * Execute business logic based on payment type
  * ALL business logic MUST be executed here on the backend
  */
-async function executeBusinessLogic(
-  supabase: any,
-  paystackData: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string; position?: number }> {
-  const metadata = paystackData.metadata || {};
-  const paymentType = metadata.type;
-
-  if (!paymentType) {
-    return {
-      success: false,
-      message: 'Payment type not specified in metadata',
-    };
-  }
-
-  switch (paymentType) {
-    case 'contribution':
-      return await processContributionPayment(supabase, paystackData);
-    case 'security_deposit':
-      return await processSecurityDeposit(supabase, paystackData);
-    case 'group_creation':
-      return await processGroupCreationPayment(supabase, paystackData);
-    case 'group_join':
-      return await processGroupJoinPayment(supabase, paystackData);
-    default:
-      return {
-        success: false,
-        message: `Unknown payment type: ${paymentType}`,
-      };
-  }
-}
-
-/**
- * Process contribution payment
- */
-async function processContributionPayment(
-  supabase: any,
-  data: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string }> {
-  const { reference, amount, metadata } = data;
-  const userId = metadata?.user_id;
-  const groupId = metadata?.group_id;
-  const cycleNumber = metadata?.cycle_number;
-
-  if (!userId || !groupId || cycleNumber === undefined) {
-    return { success: false, message: 'Missing required metadata for contribution' };
-  }
-
-  // Find the contribution record
-  const { data: contribution, error: findError } = await supabase
-    .from('contributions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('group_id', groupId)
-    .eq('cycle_number', cycleNumber)
-    .maybeSingle();
-
-  if (findError || !contribution) {
-    console.error('Contribution not found:', findError);
-    return { success: false, message: 'Contribution not found' };
-  }
-
-  // Update contribution status
-  const { error: updateError } = await supabase
-    .from('contributions')
-    .update({
-      status: 'paid',
-      paid_date: new Date(data.paid_at).toISOString(),
-      transaction_ref: reference,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', contribution.id);
-
-  if (updateError) {
-    console.error('Failed to update contribution:', updateError);
-    return { success: false, message: 'Failed to update contribution' };
-  }
-
-  // Create transaction record
-  const { error: txError } = await supabase
-    .from('transactions')
-    .insert({
-      user_id: userId,
-      group_id: groupId,
-      type: 'contribution',
-      amount: amount / 100, // Convert from kobo to Naira
-      status: 'completed',
-      reference: reference,
-      payment_method: 'paystack',
-      metadata: {
-        paystack_id: data.id,
-        contribution_id: contribution.id,
-        cycle_number: cycleNumber,
-      },
-    });
-
-  if (txError) {
-    console.error('Failed to create transaction:', txError);
-  }
-
-  return { success: true, message: 'Contribution payment processed successfully' };
-}
-
-/**
- * Process security deposit payment
- */
-async function processSecurityDeposit(
-  supabase: any,
-  data: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string }> {
-  const { reference, amount, metadata } = data;
-  const userId = metadata?.user_id;
-  const groupId = metadata?.group_id;
-
-  if (!userId || !groupId) {
-    return { success: false, message: 'Missing required metadata for security deposit' };
-  }
-
-  // Update group_members record
-  const { error: updateError } = await supabase
-    .from('group_members')
-    .update({
-      has_paid_security_deposit: true,
-      security_deposit_payment_ref: reference,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId)
-    .eq('group_id', groupId);
-
-  if (updateError) {
-    console.error('Failed to update security deposit:', updateError);
-    return { success: false, message: 'Failed to update security deposit' };
-  }
-
-  // Create transaction record
-  const { error: txError } = await supabase
-    .from('transactions')
-    .insert({
-      user_id: userId,
-      group_id: groupId,
-      type: 'security_deposit',
-      amount: amount / 100, // Convert from kobo to Naira
-      status: 'completed',
-      reference: reference,
-      payment_method: 'paystack',
-      metadata: {
-        paystack_id: data.id,
-      },
-    });
-
-  if (txError) {
-    console.error('Failed to create transaction:', txError);
-  }
-
-  return { success: true, message: 'Security deposit payment processed successfully' };
-}
-
-/**
- * Helper function to create first contribution record
- */
-async function createFirstContribution(
-  supabase: any,
-  groupId: string,
-  userId: string,
-  amount: number,
-  reference: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('contributions')
-    .insert({
-      group_id: groupId,
-      user_id: userId,
-      amount: amount,
-      cycle_number: FIRST_CYCLE_NUMBER,
-      status: 'paid',
-      due_date: new Date().toISOString(),
-      paid_date: new Date().toISOString(),
-      transaction_ref: reference,
-    });
-
-  if (error) {
-    console.error('Failed to create contribution:', error);
-    return false;
-  }
-  return true;
-}
-
-/**
- * Helper function to create payment transaction records
- */
-async function createPaymentTransactions(
-  supabase: any,
-  groupId: string,
-  userId: string,
-  reference: string,
-  securityDepositAmount: number,
-  contributionAmount: number,
-  isCreator: boolean
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('transactions')
-    .insert([
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'security_deposit',
-        amount: securityDepositAmount,
-        status: 'completed',
-        reference: reference + '_SD',
-        description: isCreator ? 'Security deposit for group creation' : 'Security deposit for joining group',
-        completed_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        group_id: groupId,
-        type: 'contribution',
-        amount: contributionAmount,
-        status: 'completed',
-        reference: reference + '_C1',
-        description: 'First contribution payment',
-        completed_at: new Date().toISOString(),
-      },
-    ]);
-
-  if (error) {
-    console.error('Failed to create transactions:', error);
-    return false;
-  }
-  return true;
-}
-
-/**
- * Helper function to increment group member count
- * Uses RPC function for atomic increment to avoid race conditions
- */
-async function incrementGroupMemberCount(
-  supabase: any,
-  groupId: string
-): Promise<boolean> {
-  // Use atomic increment via SQL to avoid race conditions
-  const { error } = await supabase.rpc('increment_group_member_count', {
-    p_group_id: groupId
-  });
-
-  if (error) {
-    console.error('Failed to increment member count:', error);
-    // Fallback to manual update if RPC doesn't exist
-    const { error: updateError } = await supabase
-      .from('groups')
-      .update({
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', groupId)
-      .select('current_members')
-      .single()
-      .then(async ({ data: group }: any) => {
-        if (group) {
-          return await supabase
-            .from('groups')
-            .update({
-              current_members: group.current_members + 1,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', groupId)
-            .eq('current_members', group.current_members); // Optimistic locking
-        }
-        return { error: null };
-      });
-    
-    if (updateError) {
-      console.error('Fallback update also failed:', updateError);
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Process group creation payment
- * Adds creator as member with selected slot and updates payment status
- */
-async function processGroupCreationPayment(
-  supabase: any,
-  data: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string; position?: number }> {
-  const { reference, amount, metadata } = data;
-  const userId = metadata?.user_id;
-  const groupId = metadata?.group_id;
-  const preferredSlot = metadata?.preferred_slot || 1;
-
-  if (!userId || !groupId) {
-    return { success: false, message: 'Missing required metadata for group creation' };
-  }
-
-  console.log(`Processing group creation payment for user ${userId} in group ${groupId}, preferred slot: ${preferredSlot}`);
-
-  // Get group details
-  const { data: group, error: groupError } = await supabase
-    .from('groups')
-    .select('contribution_amount, security_deposit_amount, total_members, created_by')
-    .eq('id', groupId)
-    .single();
-
-  if (groupError || !group) {
-    console.error('Group not found:', groupError);
-    return { success: false, message: 'Group not found' };
-  }
-
-  // Verify user is the creator
-  if (group.created_by !== userId) {
-    console.error('User is not the creator of this group');
-    return { success: false, message: 'Only the group creator can make this payment' };
-  }
-
-  // Verify payment amount
-  const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
-  if (amount < requiredAmount) {
-    return {
-      success: false,
-      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
-    };
-  }
-
-  // Check if user is already a member
-  const { data: existingMember } = await supabase
-    .from('group_members')
-    .select('id, position, has_paid_security_deposit')
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  let memberPosition = preferredSlot;
-
-  if (!existingMember) {
-    // Creator is not yet a member - add them with their preferred slot
-    console.log(`Adding creator as member with preferred slot ${preferredSlot}`);
-    
-    // Call add_member_to_group function to add creator
-    const { data: addMemberResult, error: addMemberError } = await supabase
-      .rpc('add_member_to_group', {
-        p_group_id: groupId,
-        p_user_id: userId,
-        p_is_creator: true,
-        p_preferred_slot: preferredSlot
-      });
-
-    if (addMemberError) {
-      console.error('Failed to add creator as member:', addMemberError);
-      return { success: false, message: 'Failed to add creator to group' };
-    }
-
-    // Check if the function returned success
-    if (addMemberResult && addMemberResult.length > 0) {
-      const result = addMemberResult[0];
-      if (!result.success) {
-        console.error('add_member_to_group failed:', result.error_message);
-        return { success: false, message: result.error_message || 'Failed to add creator to group' };
-      }
-      memberPosition = result.position || preferredSlot;
-    }
-
-    // Update the newly added member's payment status
-    const { error: memberError } = await supabase
-      .from('group_members')
-      .update({
-        has_paid_security_deposit: true,
-        security_deposit_paid_at: new Date().toISOString(),
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('group_id', groupId)
-      .eq('user_id', userId);
-
-    if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
-      return { success: false, message: 'Failed to update member payment status' };
-    }
-  } else {
-    // Creator is already a member - check if already paid (idempotency)
-    if (existingMember.has_paid_security_deposit) {
-      console.log('User has already paid, skipping duplicate processing');
-      return {
-        success: true,
-        message: 'Payment already processed',
-        position: existingMember.position,
-      };
-    }
-
-    memberPosition = existingMember.position;
-
-    // Update existing member's payment status
-    const { error: memberError } = await supabase
-      .from('group_members')
-      .update({
-        has_paid_security_deposit: true,
-        security_deposit_paid_at: new Date().toISOString(),
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('group_id', groupId)
-      .eq('user_id', userId);
-
-    if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
-      return { success: false, message: 'Failed to update member payment status' };
-    }
-  }
-
-  // Update or create first contribution record
-  const { error: contribError } = await supabase
-    .from('contributions')
-    .upsert({
-      group_id: groupId,
-      user_id: userId,
-      amount: group.contribution_amount,
-      cycle_number: FIRST_CYCLE_NUMBER,
-      status: 'paid',
-      due_date: new Date().toISOString(),
-      paid_date: new Date().toISOString(),
-      transaction_ref: reference,
-    }, {
-      onConflict: 'group_id,user_id,cycle_number'
-    });
-
-  if (contribError) {
-    console.error('Failed to update contribution:', contribError);
-    // Non-fatal, continue
-  }
-
-  // Create transaction records using helper
-  await createPaymentTransactions(
-    supabase,
-    groupId,
-    userId,
-    reference,
-    group.security_deposit_amount,
-    group.contribution_amount,
-    true // isCreator
-  );
-
-  console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
-  return {
-    success: true,
-    message: 'Group creation payment processed successfully',
-    position: memberPosition,
-  };
-}
-
-/**
- * Process group join payment
- * Updates payment status for member who is already added to the group
- */
-async function processGroupJoinPayment(
-  supabase: any,
-  data: PaystackVerificationResponse['data']
-): Promise<{ success: boolean; message: string; position?: number }> {
-  const { reference, amount, metadata } = data;
-  const userId = metadata?.user_id;
-  const groupId = metadata?.group_id;
-  const preferredSlot = metadata?.preferred_slot;
-
-  if (!userId || !groupId) {
-    return { success: false, message: 'Missing required metadata for group join' };
-  }
-
-  console.log(`Processing group join payment for user ${userId} in group ${groupId}`);
-
-  // Get group details
-  const { data: group, error: groupError } = await supabase
-    .from('groups')
-    .select('contribution_amount, security_deposit_amount, current_members, max_members')
-    .eq('id', groupId)
-    .single();
-
-  if (groupError || !group) {
-    console.error('Group not found:', groupError);
-    return { success: false, message: 'Group not found' };
-  }
-
-  // Verify payment amount
-  const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
-  if (amount < requiredAmount) {
-    return {
-      success: false,
-      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
-    };
-  }
-
-  // Check if user is a member (should be, as they're added on join approval)
-  const { data: existingMember } = await supabase
-    .from('group_members')
-    .select('id, position, has_paid_security_deposit')
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (!existingMember) {
-    console.error('User is not a member of the group - this should not happen');
-    return { success: false, message: 'User is not a member of this group' };
-  }
-
-  // Check if already paid (idempotency)
-  if (existingMember.has_paid_security_deposit) {
-    console.log('User has already paid, skipping duplicate processing');
-    return {
-      success: true,
-      message: 'Payment already processed',
-      position: existingMember.position,
-    };
-  }
-
-  // Update member payment status
-  const { error: memberError } = await supabase
-    .from('group_members')
-    .update({
-      has_paid_security_deposit: true,
-      security_deposit_paid_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId);
-
-  if (memberError) {
-    console.error('Failed to update member payment status:', memberError);
-    return { success: false, message: 'Failed to update member payment status' };
-  }
-
-  // Update first contribution to paid status
-  const { error: contribError } = await supabase
-    .from('contributions')
-    .update({
-      status: 'paid',
-      paid_date: new Date().toISOString(),
-      transaction_ref: reference,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .eq('cycle_number', FIRST_CYCLE_NUMBER);
-
-  if (contribError) {
-    console.error('Failed to update contribution:', contribError);
-    // Non-fatal, continue
-  }
-
-  // Create transaction records using helper
-  await createPaymentTransactions(
-    supabase,
-    groupId,
-    userId,
-    reference,
-    group.security_deposit_amount,
-    group.contribution_amount,
-    false // isCreator
-  );
-
-  // Update join request status to 'joined' if it exists
-  const { error: joinReqError } = await supabase
-    .from('group_join_requests')
-    .update({
-      status: 'joined',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .eq('status', 'approved');
-
-  if (joinReqError) {
-    console.error('Failed to update join request:', joinReqError);
-    // Non-fatal, continue
-  }
-
-  console.log('Group join payment processed successfully');
-  return {
-    success: true,
-    message: 'Group join payment processed successfully',
-    position: existingMember.position,
-  };
-}
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -1041,7 +476,8 @@ serve(async (req) => {
     console.log('Payment status:', verificationResponse.data.status);
     console.log('Payment amount:', verificationResponse.data.amount);
 
-    // Step 2: Store payment record (using supabase client created earlier)
+    // Step 2: Store payment record (MANDATORY per spec)
+    // This is the ONLY action we take - business logic is handled by webhook
     console.log('Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
     console.log('Store result:', storeResult);
@@ -1071,28 +507,23 @@ serve(async (req) => {
       );
     }
 
-    // Step 3: Execute business logic only if payment was successful and verified
-    let businessLogicResult = { success: true, message: 'No business logic needed' };
-    
-    if (verificationResponse.data.status === 'success') {
-      console.log('Executing business logic...');
-      businessLogicResult = await executeBusinessLogic(supabase, verificationResponse.data);
-      console.log('Business logic result:', businessLogicResult);
-    } else {
-      console.log('Payment not successful, skipping business logic. Status:', verificationResponse.data.status);
-    }
-
+    // ✅ IMPORTANT: Business logic is NOT executed here
+    // All business logic (updating contributions, group_members, transactions)
+    // is handled exclusively by the paystack-webhook function.
+    // This ensures webhook is the single source of truth for payment processing.
+    console.log('Payment verified and stored. Business logic will be processed by webhook.');
     console.log('===== PAYMENT VERIFICATION END =====');
 
-    // Return combined result
+    // Return verification result - webhook will handle business logic
     return new Response(
       JSON.stringify({
-        success: verificationResponse.data.status === 'success' && businessLogicResult.success,
+        success: verificationResponse.data.status === 'success',
         payment_status: verificationResponse.data.status,
         verified: verificationResponse.data.status === 'success',
         amount: verificationResponse.data.amount,
-        message: businessLogicResult.message,
-        position: businessLogicResult.position, // Include position for group join/creation
+        message: verificationResponse.data.status === 'success' 
+          ? 'Payment verified successfully. Processing in progress via webhook.' 
+          : 'Payment verification completed',
         data: {
           reference: verificationResponse.data.reference,
           amount: verificationResponse.data.amount,
