@@ -55,7 +55,7 @@ export const createGroup = async (
         contribution_amount: data.contributionAmount,
         frequency: data.frequency,
         total_members: data.totalMembers,
-        current_members: 0, // Start at 0, will be incremented when creator is added as member
+        current_members: 0, // Start at 0, will be incremented to 1 by trigger when creator is added
         security_deposit_amount: securityDepositAmount,
         security_deposit_percentage: data.securityDepositPercentage,
         service_fee_percentage: DEFAULT_SERVICE_FEE_PERCENTAGE, // Explicitly set the service fee percentage
@@ -72,33 +72,47 @@ export const createGroup = async (
       return { success: false, error: error.message };
     }
 
-    // NOTE: Creator is NOT automatically added as member
-    // They will be added after payment is completed via processGroupCreationPayment()
-    // This ensures payment-first membership model
+    // NOTE: Creator is now automatically added as member via database trigger
+    // The trigger adds them immediately with position 1 and status 'active'
+    // Payment is tracked separately and not required for membership
+
+    // Fetch the updated group data to get the correct current_members count
+    const { data: updatedGroupData, error: fetchError } = await supabase
+      .from('groups')
+      .select('*')
+      .eq('id', groupData.id)
+      .single();
+
+    if (fetchError) {
+      console.warn('Warning: Could not fetch updated group data:', fetchError);
+      // Continue with original data
+    }
+
+    const finalGroupData = updatedGroupData || groupData;
 
     return {
       success: true,
       group: {
-        id: groupData.id,
-        name: groupData.name,
-        description: groupData.description,
-        createdBy: groupData.created_by,
-        creatorProfileImage: groupData.creator_profile_image,
-        creatorPhone: groupData.creator_phone,
-        contributionAmount: groupData.contribution_amount,
-        frequency: groupData.frequency,
-        totalMembers: groupData.total_members,
-        currentMembers: 0, // Will be 1 after payment
-        securityDepositAmount: groupData.security_deposit_amount,
-        securityDepositPercentage: groupData.security_deposit_percentage,
-        status: groupData.status,
-        createdAt: groupData.created_at,
-        startDate: groupData.start_date,
-        currentCycle: groupData.current_cycle,
-        totalCycles: groupData.total_cycles,
+        id: finalGroupData.id,
+        name: finalGroupData.name,
+        description: finalGroupData.description,
+        createdBy: finalGroupData.created_by,
+        creatorProfileImage: finalGroupData.creator_profile_image,
+        creatorPhone: finalGroupData.creator_phone,
+        contributionAmount: finalGroupData.contribution_amount,
+        frequency: finalGroupData.frequency,
+        totalMembers: finalGroupData.total_members,
+        currentMembers: finalGroupData.current_members || 1, // Creator is now a member
+        securityDepositAmount: finalGroupData.security_deposit_amount,
+        securityDepositPercentage: finalGroupData.security_deposit_percentage,
+        status: finalGroupData.status,
+        createdAt: finalGroupData.created_at,
+        startDate: finalGroupData.start_date,
+        currentCycle: finalGroupData.current_cycle,
+        totalCycles: finalGroupData.total_cycles,
         rotationOrder: [],
         members: [],
-        serviceFeePercentage: groupData.service_fee_percentage || DEFAULT_SERVICE_FEE_PERCENTAGE,
+        serviceFeePercentage: finalGroupData.service_fee_percentage || DEFAULT_SERVICE_FEE_PERCENTAGE,
       },
     };
   } catch (error) {

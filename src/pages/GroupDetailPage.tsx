@@ -625,54 +625,54 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Status Alert - Show payment prompt for group creator who hasn't paid */}
-        {isCreator && !currentUserMember && group?.status === 'forming' && (
+        {isCreator && currentUserMember && !currentUserMember.securityDepositPaid && group?.status === 'forming' && (
           <Alert className="bg-orange-50 border-orange-200">
             <AlertCircle className="h-4 w-4 text-orange-600" />
             <AlertDescription className="flex items-center justify-between">
               <div>
                 <span className="text-orange-900 font-semibold">
-                  Complete Your Payment to Become Group Admin
+                  Complete Your Security Deposit Payment
                 </span>
                 <p className="text-sm text-orange-700 mt-1">
-                  You created this group but haven't completed your payment yet. 
-                  Please complete your payment (security deposit + first contribution) to become the group admin and activate your membership.
+                  You are now a member of this group but need to complete your security deposit payment 
+                  (security deposit + first contribution) to fully activate your membership and allow the group to begin.
                 </p>
               </div>
               <Button
-                onClick={() => setShowCreatorJoinDialog(true)}
+                onClick={handlePaySecurityDeposit}
                 disabled={isProcessingPayment}
                 size="sm"
                 className="ml-4"
               >
                 <CreditCard className="w-4 h-4 mr-2" />
-                Join & Pay
+                Pay Now
               </Button>
             </AlertDescription>
           </Alert>
         )}
 
-        {/* Status Alert - Show approved payment prompt for users with approved join requests */}
-        {hasApprovedJoinRequest() && (
+        {/* Status Alert - Show payment prompt for members who haven't paid */}
+        {currentUserMember && !currentUserMember.securityDepositPaid && !isCreator && group?.status === 'forming' && (
           <Alert className="bg-green-50 border-green-200">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <AlertDescription className="flex items-center justify-between">
               <div>
                 <span className="text-green-900 font-semibold">
-                  Your request has been approved!
+                  Welcome to the group!
                 </span>
                 <p className="text-sm text-green-700 mt-1">
-                  Complete your payment to become a member of this group.
-                  {userJoinRequest.preferred_slot && ` Your selected slot: Position ${userJoinRequest.preferred_slot}`}
+                  Complete your payment (security deposit + first contribution) to fully activate your membership.
+                  Your position: {currentUserMember.rotationPosition}
                 </p>
               </div>
               <Button
-                onClick={() => setShowApprovedPaymentDialog(true)}
+                onClick={handlePaySecurityDeposit}
                 disabled={isProcessingPayment}
                 size="sm"
                 className="ml-4"
               >
                 <CreditCard className="w-4 h-4 mr-2" />
-                Pay to Join
+                Pay Now
               </Button>
             </AlertDescription>
           </Alert>
