@@ -411,8 +411,15 @@ async function processGroupCreationPayment(
 ): Promise<{ success: boolean; message: string }> {
   const { reference, amount, metadata, status } = data;
 
+  console.log('=== PROCESS GROUP CREATION PAYMENT START ===');
+  console.log('Reference:', reference);
+  console.log('Amount:', amount);
+  console.log('Status:', status);
+  console.log('Metadata:', JSON.stringify(metadata, null, 2));
+
   // Verify payment was successful
   if (status !== 'success') {
+    console.error('Payment status is not success:', status);
     return { success: false, message: 'Payment not successful' };
   }
 
@@ -421,6 +428,7 @@ async function processGroupCreationPayment(
   const preferredSlot = metadata?.preferred_slot || 1;
 
   if (!userId || !groupId) {
+    console.error('Missing required metadata:', { userId, groupId, preferredSlot });
     return { success: false, message: 'Missing required metadata for group creation' };
   }
 
@@ -438,9 +446,16 @@ async function processGroupCreationPayment(
     return { success: false, message: 'Group not found' };
   }
 
+  console.log('Group found:', { 
+    contribution_amount: group.contribution_amount, 
+    security_deposit_amount: group.security_deposit_amount,
+    total_members: group.total_members,
+    created_by: group.created_by
+  });
+
   // Verify user is the creator
   if (group.created_by !== userId) {
-    console.error('User is not the creator of this group');
+    console.error('User is not the creator of this group. Creator:', group.created_by, 'User:', userId);
     return { success: false, message: 'Only the group creator can make this payment' };
   }
 
@@ -570,9 +585,12 @@ async function processGroupCreationPayment(
     console.error('Failed to create transaction records - payment processed but audit trail incomplete');
     // Non-fatal - payment status is already updated correctly
     // Transaction records are for audit purposes and can be fixed later
+  } else {
+    console.log('Transaction records created successfully');
   }
 
   console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
+  console.log('=== PROCESS GROUP CREATION PAYMENT END (SUCCESS) ===');
   return { success: true, message: 'Group creation payment processed successfully' };
 }
 
@@ -586,8 +604,15 @@ async function processGroupJoinPayment(
 ): Promise<{ success: boolean; message: string }> {
   const { reference, amount, metadata, status } = data;
 
+  console.log('=== PROCESS GROUP JOIN PAYMENT START ===');
+  console.log('Reference:', reference);
+  console.log('Amount:', amount);
+  console.log('Status:', status);
+  console.log('Metadata:', JSON.stringify(metadata, null, 2));
+
   // Verify payment was successful
   if (status !== 'success') {
+    console.error('Payment status is not success:', status);
     return { success: false, message: 'Payment not successful' };
   }
 
@@ -595,6 +620,7 @@ async function processGroupJoinPayment(
   const groupId = metadata?.group_id;
 
   if (!userId || !groupId) {
+    console.error('Missing required metadata:', { userId, groupId });
     return { success: false, message: 'Missing required metadata for group join' };
   }
 
@@ -690,6 +716,8 @@ async function processGroupJoinPayment(
     console.error('Failed to create transaction records - payment processed but audit trail incomplete');
     // Non-fatal - payment status is already updated correctly
     // Transaction records are for audit purposes and can be fixed later
+  } else {
+    console.log('Transaction records created successfully');
   }
 
   // Update join request status to 'joined' if it exists
@@ -707,9 +735,12 @@ async function processGroupJoinPayment(
     console.error('Failed to update join request:', joinReqError);
     // Non-fatal - the core payment processing succeeded
     // Join request status update is a secondary operation
+  } else {
+    console.log('Join request status updated to joined');
   }
 
   console.log('Group join payment processed successfully');
+  console.log('=== PROCESS GROUP JOIN PAYMENT END (SUCCESS) ===');
   return { success: true, message: 'Group join payment processed successfully' };
 }
 
@@ -787,6 +818,10 @@ serve(async (req) => {
     switch (event.event) {
       case 'charge.success': {
         const paymentType = event.data.metadata?.type;
+        
+        console.log('Processing charge.success event');
+        console.log('Payment type:', paymentType);
+        console.log('Metadata:', JSON.stringify(event.data.metadata, null, 2));
 
         if (paymentType === 'contribution') {
           result = await processContributionPayment(supabase, event.data);
@@ -797,9 +832,11 @@ serve(async (req) => {
         } else if (paymentType === 'group_join') {
           result = await processGroupJoinPayment(supabase, event.data);
         } else {
+          console.error('Unknown payment type received:', paymentType);
+          console.error('Full metadata:', event.data.metadata);
           result = { 
             success: false, 
-            message: `Unknown payment type: ${paymentType}` 
+            message: `Unknown payment type: ${paymentType}. Expected one of: contribution, security_deposit, group_creation, group_join` 
           };
         }
         break;

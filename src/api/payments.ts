@@ -47,7 +47,8 @@ interface VerifyPaymentResponse {
  */
 export const initializeGroupCreationPayment = async (
   groupId: string,
-  amount: number
+  amount: number,
+  preferredSlot?: number
 ): Promise<{ success: boolean; reference?: string; error?: string }> => {
   try {
     const supabase = createClient();
@@ -81,6 +82,7 @@ export const initializeGroupCreationPayment = async (
         type: 'group_creation',
         group_id: groupId,
         user_id: user.id,
+        preferred_slot: preferredSlot || 1, // Store preferred slot for webhook processing
       },
     });
 
