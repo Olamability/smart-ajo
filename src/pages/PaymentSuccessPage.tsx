@@ -57,9 +57,25 @@ export default function PaymentSuccessPage() {
         setMemberPosition(result.position || null);
         toast.success('Payment verified! Your transaction is complete.');
       } else {
-        setVerificationStatus('failed');
-        setVerificationMessage(result.message || result.error || 'Payment verification failed');
-        toast.error(result.message || 'Payment verification failed');
+        // Check if the error is due to session expiration
+        if (result.payment_status === 'unauthorized' && 
+            (result.error?.includes('Session') || result.error?.includes('expired'))) {
+          setVerificationStatus('failed');
+          setVerificationMessage(
+            result.message || 
+            'Your session expired. The page will refresh automatically to reconnect. Your payment was successful.'
+          );
+          toast.info('Refreshing session to verify your payment...', { duration: 3000 });
+          
+          // Auto-refresh the page after 3 seconds to get a fresh session
+          setTimeout(() => {
+            window.location.reload();
+          }, 3000);
+        } else {
+          setVerificationStatus('failed');
+          setVerificationMessage(result.message || result.error || 'Payment verification failed');
+          toast.error(result.message || 'Payment verification failed');
+        }
       }
     } catch (error) {
       if (import.meta.env.DEV) {
