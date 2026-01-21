@@ -57,7 +57,7 @@ async function checkDatabase(supabase: any): Promise<ComponentStatus> {
   try {
     // Simple query to check database is accessible
     const { error } = await supabase
-      .from('profiles')
+      .from('users')
       .select('id')
       .limit(1);
     
