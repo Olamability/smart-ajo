@@ -87,15 +87,14 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  }, [reference]);
+  }, [reference, navigate]);
 
   useEffect(() => {
     // Auto-verify payment if reference is provided
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference, navigate]);
+  }, [reference, verificationStatus, handleVerifyPayment]);
 
   // Cleanup timeout on unmount to prevent memory leaks
   useEffect(() => {
