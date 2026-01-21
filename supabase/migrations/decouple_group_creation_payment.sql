@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION add_member_to_group(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 ) 
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -263,7 +263,7 @@ CREATE OR REPLACE FUNCTION process_group_creation_payment(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -299,7 +299,7 @@ BEGIN
 
   -- Get the member's position
   RETURN QUERY 
-  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position
+  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position AS member_position
   FROM group_members gm
   WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id;
 END;
@@ -317,7 +317,7 @@ CREATE OR REPLACE FUNCTION process_group_join_payment(
 RETURNS TABLE(
   success BOOLEAN,
   error_message TEXT,
-  position INTEGER
+  member_position INTEGER
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -353,7 +353,7 @@ BEGIN
 
   -- Get the member's position
   RETURN QUERY 
-  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position
+  SELECT TRUE, 'Payment processed successfully'::TEXT, gm.position AS member_position
   FROM group_members gm
   WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id;
 END;
