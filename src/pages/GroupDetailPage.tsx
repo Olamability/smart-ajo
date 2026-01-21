@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getGroupById, 
@@ -79,6 +79,7 @@ export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +104,23 @@ export default function GroupDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Reload data when returning to the page (e.g., after payment)
+  // This effect runs when the location state indicates return from payment
+  useEffect(() => {
+    const fromPayment = location.state?.fromPayment;
+    if (id && fromPayment) {
+      // Reload all data when returning from payment
+      loadGroupDetails();
+      loadMembers();
+      loadJoinRequests();
+      loadUserJoinRequestStatus();
+      
+      // Clear the state to avoid reloading on every render
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state?.fromPayment, id]);
 
   // Reload members data when page regains focus (e.g., after payment)
   useEffect(() => {
@@ -400,6 +418,11 @@ export default function GroupDetailPage() {
     );
   };
 
+  // Helper function to check if creator needs to complete payment
+  const shouldShowCreatorPaymentPrompt = () => {
+    return isCreator && !currentUserMember?.securityDepositPaid && group?.status === 'forming';
+  };
+
   // Helper function to determine if user has approved join request (for future use)
   const _hasApprovedJoinRequest = () => {
     return (
@@ -470,7 +493,7 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Status Alert - Show payment prompt for group creator who hasn't paid */}
-        {isCreator && !currentUserMember && group?.status === 'forming' && (
+        {shouldShowCreatorPaymentPrompt() && (
           <div className="space-y-4">
             <Alert className="bg-orange-50 border-orange-200">
               <AlertCircle className="h-4 w-4 text-orange-600" />

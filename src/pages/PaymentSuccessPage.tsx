@@ -109,8 +109,9 @@ export default function PaymentSuccessPage() {
 
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
+    // Pass state to trigger data reload
     if (groupId) {
-      navigate(`/groups/${groupId}`);
+      navigate(`/groups/${groupId}`, { state: { fromPayment: true } });
     } else {
       navigate('/dashboard');
     }
