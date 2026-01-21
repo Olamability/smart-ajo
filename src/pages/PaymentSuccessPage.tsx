@@ -10,8 +10,11 @@ import { toast } from 'sonner';
 
 type VerificationStatus = 'idle' | 'verifying' | 'processing' | 'verified' | 'failed';
 
-// Default messages for different states
+// Constants
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
+const DEFAULT_PREFERRED_SLOT = 1; // Default slot position if none specified
+const WEBHOOK_POLLING_INTERVAL_MS = 3000; // 3 seconds between polls
+const WEBHOOK_POLLING_MAX_ATTEMPTS = 10; // Maximum 10 attempts (30 seconds total)
 
 /**
  * PaymentSuccessPage - Callback URL page for payment redirects
@@ -44,28 +47,32 @@ export default function PaymentSuccessPage() {
    * This polls the database to check if the member was added to the group
    */
   const checkWebhookProcessing = useCallback(async (
-    userId: string,
-    maxAttempts: number = 10,
-    intervalMs: number = 2000
+    userId: string
   ): Promise<{ success: boolean; position?: number }> => {
+    // Validate groupId before polling
+    if (!groupId) {
+      console.error('Cannot check webhook processing: groupId is null');
+      return { success: false };
+    }
+    
     const supabase = createClient();
     
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= WEBHOOK_POLLING_MAX_ATTEMPTS; attempt++) {
       if (import.meta.env.DEV) {
-        console.log(`Checking webhook processing (attempt ${attempt}/${maxAttempts})...`);
+        console.log(`Checking webhook processing (attempt ${attempt}/${WEBHOOK_POLLING_MAX_ATTEMPTS})...`);
       }
       
       // Check if user is a member with payment processed
       const { data: member, error } = await supabase
         .from('group_members')
         .select('id, position, has_paid_security_deposit, status')
-        .eq('group_id', groupId!)
+        .eq('group_id', groupId)
         .eq('user_id', userId)
         .maybeSingle();
       
       if (error) {
         console.error('Error checking member status:', error);
-        if (attempt === maxAttempts) {
+        if (attempt === WEBHOOK_POLLING_MAX_ATTEMPTS) {
           return { success: false };
         }
       } else if (member?.has_paid_security_deposit && member.status === 'active') {
@@ -77,8 +84,8 @@ export default function PaymentSuccessPage() {
       }
       
       // Wait before next attempt
-      if (attempt < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, intervalMs));
+      if (attempt < WEBHOOK_POLLING_MAX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, WEBHOOK_POLLING_INTERVAL_MS));
       }
     }
     

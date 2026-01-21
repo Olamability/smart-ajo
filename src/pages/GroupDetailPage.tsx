@@ -266,12 +266,9 @@ export default function GroupDetailPage() {
       // Calculate total amount (security deposit + first contribution)
       const totalAmount = group.securityDepositAmount + group.contributionAmount;
 
-      // Get preferred slot: from selectedSlot for creators, from member position for others
-      const preferredSlot = isCreator ? selectedSlot : currentUserMember?.rotationPosition;
-
       // Initialize payment record based on whether user is creator or regular member
       const initResult = isCreator 
-        ? await initializeGroupCreationPayment(id, totalAmount, preferredSlot)
+        ? await initializeGroupCreationPayment(id, totalAmount, selectedSlot)
         : await initializeGroupJoinPayment(id, totalAmount);
       
       if (!initResult.success || !initResult.reference) {
@@ -279,6 +276,9 @@ export default function GroupDetailPage() {
         setIsProcessingPayment(false);
         return;
       }
+
+      // Get preferred slot for Paystack metadata: from selectedSlot for creators, from member position for others
+      const preferredSlot = isCreator ? selectedSlot : currentUserMember?.rotationPosition;
 
       // Open Paystack payment popup
       // Using callback_url to redirect user to payment success page after payment
