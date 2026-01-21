@@ -13,6 +13,17 @@
 import { createClient } from '@/lib/client/supabase';
 import { getErrorMessage } from '@/lib/utils';
 
+/**
+ * Helper function to check if a Supabase session is expired
+ */
+const isSessionExpired = (session: { expires_at?: number } | null): boolean => {
+  if (!session?.expires_at) {
+    return true;
+  }
+  // Supabase returns expires_at as a Unix timestamp in seconds
+  return session.expires_at < Date.now() / 1000;
+};
+
 interface VerifyPaymentResponse {
   success: boolean;
   payment_status: string;
@@ -177,7 +188,7 @@ export const verifyPayment = async (
       payment_status: 'unauthorized',
       verified: false,
       amount: 0,
-      message: 'Your session has expired. Please log in again to verify your payment.',
+      message: 'No active session found. Please refresh this page or log in again to verify your payment. Your payment was successful and will be verified once you reconnect.',
       error: 'Session expired - please log in again',
     };
   }
@@ -192,15 +203,14 @@ export const verifyPayment = async (
     console.log('Will attempt to use current session if still valid');
     
     // Check if current session is still valid (not expired)
-    // Supabase returns expires_at as a Unix timestamp in seconds
-    if (currentSession.expires_at && currentSession.expires_at < Date.now() / 1000) {
+    if (isSessionExpired(currentSession)) {
       console.error('Current session has expired and refresh failed');
       return {
         success: false,
         payment_status: 'unauthorized',
         verified: false,
         amount: 0,
-        message: 'Your session has expired. Please log out and log in again, then try the payment.',
+        message: 'Your session has expired. Please refresh this page or log in again to verify your payment. Your payment was successful and will be verified once you reconnect.',
         error: 'Session expired and refresh failed',
       };
     }
@@ -210,6 +220,20 @@ export const verifyPayment = async (
   } else {
     console.log('Session refreshed successfully');
     activeSession = refreshData.session;
+    
+    // CRITICAL: Verify the refreshed session is actually valid
+    // Sometimes refreshSession() returns a new session but with an expired token
+    if (isSessionExpired(activeSession)) {
+      console.error('Refreshed session is already expired!');
+      return {
+        success: false,
+        payment_status: 'unauthorized',
+        verified: false,
+        amount: 0,
+        message: 'Session refresh returned an expired token. Please refresh this page or log in again to verify your payment. Your payment was successful and will be verified once you reconnect.',
+        error: 'Refreshed session is expired',
+      };
+    }
   }
   
   // Verify we have a valid user with the active session
@@ -335,7 +359,7 @@ export const verifyPayment = async (
             payment_status: 'unauthorized',
             verified: false,
             amount: 0,
-            message: 'Authentication failed during payment verification. Please log out, log in again, and retry the payment.',
+            message: 'Session expired during payment verification. Please refresh this page to retry. Your payment was successful and will be verified once you reconnect.',
             error: 'Authentication failed - token validation error',
           };
         }

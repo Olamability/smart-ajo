@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
@@ -26,6 +26,7 @@ export default function PaymentSuccessPage() {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get payment reference and group ID from URL query params
   // Paystack may send either 'reference' or 'trxref' depending on callback configuration
@@ -57,9 +58,26 @@ export default function PaymentSuccessPage() {
         setMemberPosition(result.position || null);
         toast.success('Payment verified! Your transaction is complete.');
       } else {
-        setVerificationStatus('failed');
-        setVerificationMessage(result.message || result.error || 'Payment verification failed');
-        toast.error(result.message || 'Payment verification failed');
+        // Check if the error is due to session expiration
+        // Use the specific payment_status field to avoid fragile string matching
+        if (result.payment_status === 'unauthorized') {
+          setVerificationStatus('failed');
+          setVerificationMessage(
+            result.message || 
+            'Your session expired. The page will refresh automatically to reconnect. Your payment was successful.'
+          );
+          toast.info('Refreshing session to verify your payment...', { duration: 3000 });
+          
+          // Auto-refresh the page after 3 seconds to get a fresh session
+          // Using navigate(0) for a cleaner refresh with React Router
+          refreshTimeoutRef.current = setTimeout(() => {
+            navigate(0);
+          }, 3000);
+        } else {
+          setVerificationStatus('failed');
+          setVerificationMessage(result.message || result.error || 'Payment verification failed');
+          toast.error(result.message || 'Payment verification failed');
+        }
       }
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -69,15 +87,23 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  }, [reference]);
+  }, [reference, navigate]);
 
   useEffect(() => {
     // Auto-verify payment if reference is provided
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference, verificationStatus]);
+  }, [reference, verificationStatus, handleVerifyPayment]);
+
+  // Cleanup timeout on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
