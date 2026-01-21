@@ -1,5 +1,9 @@
 # Payment Verification Troubleshooting Guide
 
+**Last Updated**: January 21, 2026  
+**Version**: 1.0.0  
+**Applies To**: smart-ajo v1.x
+
 ## Overview
 
 This guide helps diagnose and fix issues when payments are successful on Paystack but not reflected on the platform.
