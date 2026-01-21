@@ -789,6 +789,18 @@ CREATE POLICY users_select_own ON users
   FOR SELECT
   USING (auth.uid() = id);
 
+-- Group members can view basic profile info of other members in the same group
+CREATE POLICY users_select_group_members ON users
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM group_members gm1
+      INNER JOIN group_members gm2 ON gm1.group_id = gm2.group_id
+      WHERE gm1.user_id = auth.uid()
+        AND gm2.user_id = users.id
+    )
+  );
+
 -- Users can update their own profile
 CREATE POLICY users_update_own ON users
   FOR UPDATE

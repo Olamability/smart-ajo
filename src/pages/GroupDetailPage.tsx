@@ -104,6 +104,23 @@ export default function GroupDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Reload members data when page regains focus (e.g., after payment)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && id) {
+        loadMembers();
+        loadGroupDetails();
+        loadJoinRequests();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   const loadGroupDetails = async () => {
     if (!id) return;
 
