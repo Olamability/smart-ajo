@@ -11,6 +11,9 @@
 -- STEP 1: Add new database function to add members without payment
 -- ============================================================================
 
+-- Drop existing function if it exists to allow changing return type
+DROP FUNCTION IF EXISTS add_member_to_group(UUID, UUID, BOOLEAN, INTEGER);
+
 CREATE OR REPLACE FUNCTION add_member_to_group(
   p_group_id UUID,
   p_user_id UUID,
@@ -247,6 +250,9 @@ $$;
 -- STEP 4: Update existing payment processing functions
 -- ============================================================================
 
+-- Drop existing function to allow changing return type
+DROP FUNCTION IF EXISTS process_group_creation_payment(VARCHAR, UUID, UUID, INTEGER);
+
 -- Update process_group_creation_payment to use new flow
 CREATE OR REPLACE FUNCTION process_group_creation_payment(
   p_payment_reference VARCHAR,
@@ -298,6 +304,9 @@ BEGIN
   WHERE gm.group_id = p_group_id AND gm.user_id = p_user_id;
 END;
 $$;
+
+-- Drop existing function to allow changing return type
+DROP FUNCTION IF EXISTS process_group_join_payment(VARCHAR, UUID, UUID);
 
 -- Update process_group_join_payment to use new flow
 CREATE OR REPLACE FUNCTION process_group_join_payment(
