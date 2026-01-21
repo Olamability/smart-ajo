@@ -425,7 +425,8 @@ async function processGroupCreationPayment(
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
-  const preferredSlot = metadata?.preferred_slot || 1;
+  // Parse preferred_slot as integer - Paystack may send it as string
+  const preferredSlot = metadata?.preferred_slot ? parseInt(String(metadata.preferred_slot), 10) : 1;
 
   if (!userId || !groupId) {
     console.error('Missing required metadata:', { userId, groupId, preferredSlot });

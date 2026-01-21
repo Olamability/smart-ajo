@@ -267,9 +267,10 @@ export default function GroupDetailPage() {
       const totalAmount = group.securityDepositAmount + group.contributionAmount;
 
       // Initialize payment record based on whether user is creator or regular member
+      // For joiners: pass the preferred_slot from their join request to ensure metadata consistency
       const initResult = isCreator 
         ? await initializeGroupCreationPayment(id, totalAmount, selectedSlot)
-        : await initializeGroupJoinPayment(id, totalAmount);
+        : await initializeGroupJoinPayment(id, totalAmount, userJoinRequest?.preferred_slot);
       
       if (!initResult.success || !initResult.reference) {
         toast.error(initResult.error || 'Failed to initialize payment');
@@ -277,8 +278,9 @@ export default function GroupDetailPage() {
         return;
       }
 
-      // Get preferred slot for Paystack metadata: from selectedSlot for creators, from member position for others
-      const preferredSlot = isCreator ? selectedSlot : currentUserMember?.rotationPosition;
+      // Get preferred slot for Paystack metadata: from selectedSlot for creators, from join request for joiners
+      // CRITICAL: For joiners, they're not yet members, so we get the slot from their join request
+      const preferredSlot = isCreator ? selectedSlot : (userJoinRequest?.preferred_slot || 1);
 
       // Open Paystack payment popup
       // Using callback_url to redirect user to payment success page after payment

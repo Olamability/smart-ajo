@@ -107,7 +107,8 @@ export const initializeGroupCreationPayment = async (
  */
 export const initializeGroupJoinPayment = async (
   groupId: string,
-  amount: number
+  amount: number,
+  preferredSlot?: number
 ): Promise<{ success: boolean; reference?: string; error?: string }> => {
   try {
     const supabase = createClient();
@@ -121,6 +122,20 @@ export const initializeGroupJoinPayment = async (
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(groupId)) {
       return { success: false, error: 'Invalid group ID' };
+    }
+
+    // If no preferred slot provided, try to get it from the join request
+    let slotToUse = preferredSlot;
+    if (!slotToUse) {
+      const { data: joinRequest } = await supabase
+        .from('group_join_requests')
+        .select('preferred_slot')
+        .eq('group_id', groupId)
+        .eq('user_id', user.id)
+        .eq('status', 'approved')
+        .maybeSingle();
+      
+      slotToUse = joinRequest?.preferred_slot || DEFAULT_PREFERRED_SLOT;
     }
 
     // Generate unique payment reference using UUID for better uniqueness
@@ -141,6 +156,7 @@ export const initializeGroupJoinPayment = async (
         type: 'group_join',
         group_id: groupId,
         user_id: user.id,
+        preferred_slot: slotToUse, // Include preferred slot in metadata
       },
     });
 
