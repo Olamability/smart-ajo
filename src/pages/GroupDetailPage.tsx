@@ -268,7 +268,7 @@ export default function GroupDetailPage() {
 
       // Initialize payment record based on whether user is creator or regular member
       const initResult = isCreator 
-        ? await initializeGroupCreationPayment(id, totalAmount)
+        ? await initializeGroupCreationPayment(id, totalAmount, selectedSlot)
         : await initializeGroupJoinPayment(id, totalAmount);
       
       if (!initResult.success || !initResult.reference) {
@@ -277,7 +277,7 @@ export default function GroupDetailPage() {
         return;
       }
 
-      // Get preferred slot: from selectedSlot for creators, from member position for others
+      // Get preferred slot for Paystack metadata: from selectedSlot for creators, from member position for others
       const preferredSlot = isCreator ? selectedSlot : currentUserMember?.rotationPosition;
 
       // Open Paystack payment popup

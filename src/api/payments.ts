@@ -13,6 +13,9 @@
 import { createClient } from '@/lib/client/supabase';
 import { getErrorMessage } from '@/lib/utils';
 
+// Constants
+const DEFAULT_PREFERRED_SLOT = 1; // Default slot position for group creators if none specified
+
 /**
  * Helper function to check if a Supabase session is expired
  */
@@ -47,7 +50,8 @@ interface VerifyPaymentResponse {
  */
 export const initializeGroupCreationPayment = async (
   groupId: string,
-  amount: number
+  amount: number,
+  preferredSlot?: number
 ): Promise<{ success: boolean; reference?: string; error?: string }> => {
   try {
     const supabase = createClient();
@@ -81,6 +85,7 @@ export const initializeGroupCreationPayment = async (
         type: 'group_creation',
         group_id: groupId,
         user_id: user.id,
+        preferred_slot: preferredSlot || DEFAULT_PREFERRED_SLOT, // Store preferred slot for webhook processing
       },
     });
 

@@ -5,12 +5,16 @@ import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { verifyPayment } from '@/api/payments';
+import { createClient } from '@/lib/client/supabase';
 import { toast } from 'sonner';
 
-type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
+type VerificationStatus = 'idle' | 'verifying' | 'processing' | 'verified' | 'failed';
 
-// Default messages for different states
+// Constants
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
+const DEFAULT_PREFERRED_SLOT = 1; // Default slot position if none specified
+const WEBHOOK_POLLING_INTERVAL_MS = 3000; // 3 seconds between polls
+const WEBHOOK_POLLING_MAX_ATTEMPTS = 10; // Maximum 10 attempts (30 seconds total)
 
 /**
  * PaymentSuccessPage - Callback URL page for payment redirects
@@ -18,10 +22,11 @@ const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and 
  * This page is ONLY responsible for:
  * 1. Receiving the payment callback from Paystack
  * 2. Calling the backend verify-payment Edge Function
- * 3. Displaying the verification result
+ * 3. Waiting for webhook to process business logic
+ * 4. Displaying the verification result
  * 
  * NO BUSINESS LOGIC is executed here. All business logic (adding members,
- * creating contributions, etc.) happens in the backend Edge Function.
+ * creating contributions, etc.) happens in the backend webhook.
  */
 export default function PaymentSuccessPage() {
   const navigate = useNavigate();
@@ -30,11 +35,63 @@ export default function PaymentSuccessPage() {
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get payment reference and group ID from URL query params
   // Paystack may send either 'reference' or 'trxref' depending on callback configuration
   const reference = searchParams.get('reference') || searchParams.get('trxref');
   const groupId = searchParams.get('group');
+
+  /**
+   * Check if webhook has processed the payment by verifying business logic completion
+   * This polls the database to check if the member was added to the group
+   */
+  const checkWebhookProcessing = useCallback(async (
+    userId: string
+  ): Promise<{ success: boolean; position?: number }> => {
+    // Validate groupId before polling
+    if (!groupId) {
+      console.error('Cannot check webhook processing: groupId is null');
+      return { success: false };
+    }
+    
+    const supabase = createClient();
+    
+    for (let attempt = 1; attempt <= WEBHOOK_POLLING_MAX_ATTEMPTS; attempt++) {
+      if (import.meta.env.DEV) {
+        console.log(`Checking webhook processing (attempt ${attempt}/${WEBHOOK_POLLING_MAX_ATTEMPTS})...`);
+      }
+      
+      // Check if user is a member with payment processed
+      const { data: member, error } = await supabase
+        .from('group_members')
+        .select('id, position, has_paid_security_deposit, status')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('Error checking member status:', error);
+        if (attempt === WEBHOOK_POLLING_MAX_ATTEMPTS) {
+          return { success: false };
+        }
+      } else if (member?.has_paid_security_deposit && member.status === 'active') {
+        // Business logic has been processed!
+        if (import.meta.env.DEV) {
+          console.log('Webhook processing confirmed! Member found:', member);
+        }
+        return { success: true, position: member.position };
+      }
+      
+      // Wait before next attempt
+      if (attempt < WEBHOOK_POLLING_MAX_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, WEBHOOK_POLLING_INTERVAL_MS));
+      }
+    }
+    
+    // Exhausted all attempts
+    return { success: false };
+  }, [groupId]);
 
   const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
@@ -51,15 +108,47 @@ export default function PaymentSuccessPage() {
     }
 
     try {
-      // Call backend verify-payment Edge Function
-      // This does ALL the work: verification + business logic
+      // Step 1: Call backend verify-payment Edge Function
+      // This verifies with Paystack and stores the payment record
       const result = await verifyPayment(reference);
       
       if (result.verified && result.success) {
-        setVerificationStatus('verified');
-        setVerificationMessage(result.message || 'Payment verified successfully!');
-        setMemberPosition(result.position || null);
-        toast.success('Payment verified! Your transaction is complete.');
+        // Payment verified with Paystack successfully
+        // Now wait for webhook to process business logic
+        setVerificationStatus('processing');
+        setVerificationMessage('Payment verified! Processing your membership...');
+        
+        if (import.meta.env.DEV) {
+          console.log('Payment verified, waiting for webhook processing...');
+        }
+        
+        // Step 2: Get current user to check webhook processing
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          setVerificationStatus('failed');
+          setVerificationMessage('Authentication error. Please log in again.');
+          return;
+        }
+        
+        // Step 3: Poll database to confirm webhook has processed the payment
+        const webhookResult = await checkWebhookProcessing(user.id);
+        
+        if (webhookResult.success) {
+          setVerificationStatus('verified');
+          setVerificationMessage(result.message || 'Payment verified successfully!');
+          setMemberPosition(webhookResult.position || result.position || null);
+          toast.success('Payment verified! Your membership is now active.');
+        } else {
+          // Webhook hasn't processed yet or failed
+          // This could mean: webhook not configured, webhook failed, or just slow
+          setVerificationStatus('verified');
+          setVerificationMessage(
+            'Payment verified! Your membership is being processed. Please refresh if you don\'t see updates shortly.'
+          );
+          toast.success('Payment verified! Processing membership...', { duration: 5000 });
+        }
       } else {
         // Check if the error is due to session expiration
         // Use the specific payment_status field to avoid fragile string matching
@@ -89,7 +178,8 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  }, [reference, navigate]);
+  }, [reference, navigate, checkWebhookProcessing]);
+
 
   useEffect(() => {
     // Auto-verify payment if reference is provided
@@ -98,11 +188,14 @@ export default function PaymentSuccessPage() {
     }
   }, [reference, verificationStatus, handleVerifyPayment]);
 
-  // Cleanup timeout on unmount to prevent memory leaks
+  // Cleanup timeouts and intervals on unmount to prevent memory leaks
   useEffect(() => {
     return () => {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
+      }
+      if (pollingIntervalRef.current) {
+        clearTimeout(pollingIntervalRef.current);
       }
     };
   }, []);
@@ -127,11 +220,17 @@ export default function PaymentSuccessPage() {
             </div>
           </div>
           <CardTitle className="text-2xl text-center">
-            {verificationStatus === 'verified' ? 'Payment Verified' : 'Payment Received'}
+            {verificationStatus === 'verified' 
+              ? 'Payment Verified' 
+              : verificationStatus === 'processing'
+              ? 'Processing Payment'
+              : 'Payment Received'}
           </CardTitle>
           <CardDescription className="text-center">
             {verificationStatus === 'verifying' 
               ? 'Verifying your payment...' 
+              : verificationStatus === 'processing'
+              ? 'Processing your membership...'
               : verificationStatus === 'verified'
               ? 'Your payment has been successfully verified.'
               : 'Your payment has been received.'}
@@ -139,7 +238,7 @@ export default function PaymentSuccessPage() {
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-4">
           {/* Status Icon */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || verificationStatus === 'processing') && (
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
           )}
           {verificationStatus === 'verified' && (
@@ -153,7 +252,7 @@ export default function PaymentSuccessPage() {
           )}
 
           {/* Status Message */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || verificationStatus === 'processing') && (
             <p className="text-sm text-muted-foreground text-center">
               {verificationMessage || DEFAULT_VERIFYING_MESSAGE}
             </p>
@@ -163,7 +262,7 @@ export default function PaymentSuccessPage() {
               <p className="text-sm text-muted-foreground text-center">
                 {memberPosition 
                   ? `Thank you! Your transaction has been verified and you have been added to the group at position ${memberPosition}.`
-                  : 'Thank you! Your transaction has been verified and processed successfully.'}
+                  : verificationMessage || 'Thank you! Your transaction has been verified and processed successfully.'}
               </p>
             </>
           )}
@@ -202,7 +301,7 @@ export default function PaymentSuccessPage() {
             <Button
               className="flex-1"
               onClick={handleNavigation}
-              disabled={verificationStatus === 'verifying'}
+              disabled={verificationStatus === 'verifying' || verificationStatus === 'processing'}
             >
               {groupId ? 'Go to Group' : 'Go to Dashboard'}
             </Button>
