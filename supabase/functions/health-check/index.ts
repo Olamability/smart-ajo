@@ -21,7 +21,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -51,7 +51,7 @@ interface ComponentStatus {
 /**
  * Check database connectivity
  */
-async function checkDatabase(supabase: any): Promise<ComponentStatus> {
+async function checkDatabase(supabase: SupabaseClient): Promise<ComponentStatus> {
   const startTime = Date.now();
   
   try {
@@ -83,7 +83,7 @@ async function checkDatabase(supabase: any): Promise<ComponentStatus> {
     return {
       status: 'down',
       responseTime,
-      error: error.message || 'Database connection failed',
+      error: error instanceof Error ? error.message : 'Database connection failed',
     };
   }
 }
@@ -148,7 +148,7 @@ async function checkAuth(): Promise<ComponentStatus> {
     return {
       status: 'down',
       responseTime,
-      error: error.message || 'Auth service unavailable',
+      error: error instanceof Error ? error.message : 'Auth service unavailable',
     };
   }
 }
