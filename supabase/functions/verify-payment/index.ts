@@ -506,7 +506,7 @@ async function incrementGroupMemberCount(
 
 /**
  * Process group creation payment
- * Updates payment status for creator who is already a member
+ * Adds creator as member with selected slot and updates payment status
  */
 async function processGroupCreationPayment(
   supabase: any,
@@ -521,18 +521,24 @@ async function processGroupCreationPayment(
     return { success: false, message: 'Missing required metadata for group creation' };
   }
 
-  console.log(`Processing group creation payment for user ${userId} in group ${groupId}`);
+  console.log(`Processing group creation payment for user ${userId} in group ${groupId}, preferred slot: ${preferredSlot}`);
 
   // Get group details
   const { data: group, error: groupError } = await supabase
     .from('groups')
-    .select('contribution_amount, security_deposit_amount')
+    .select('contribution_amount, security_deposit_amount, total_members, created_by')
     .eq('id', groupId)
     .single();
 
   if (groupError || !group) {
     console.error('Group not found:', groupError);
     return { success: false, message: 'Group not found' };
+  }
+
+  // Verify user is the creator
+  if (group.created_by !== userId) {
+    console.error('User is not the creator of this group');
+    return { success: false, message: 'Only the group creator can make this payment' };
   }
 
   // Verify payment amount
@@ -544,7 +550,7 @@ async function processGroupCreationPayment(
     };
   }
 
-  // Check if user is already a member (should be, as they're auto-added on group creation)
+  // Check if user is already a member
   const { data: existingMember } = await supabase
     .from('group_members')
     .select('id, position, has_paid_security_deposit')
@@ -552,49 +558,98 @@ async function processGroupCreationPayment(
     .eq('user_id', userId)
     .maybeSingle();
 
+  let memberPosition = preferredSlot;
+
   if (!existingMember) {
-    console.error('Creator is not a member of the group - this should not happen');
-    return { success: false, message: 'User is not a member of this group' };
+    // Creator is not yet a member - add them with their preferred slot
+    console.log(`Adding creator as member with preferred slot ${preferredSlot}`);
+    
+    // Call add_member_to_group function to add creator
+    const { data: addMemberResult, error: addMemberError } = await supabase
+      .rpc('add_member_to_group', {
+        p_group_id: groupId,
+        p_user_id: userId,
+        p_is_creator: true,
+        p_preferred_slot: preferredSlot
+      });
+
+    if (addMemberError) {
+      console.error('Failed to add creator as member:', addMemberError);
+      return { success: false, message: 'Failed to add creator to group' };
+    }
+
+    // Check if the function returned success
+    if (addMemberResult && addMemberResult.length > 0) {
+      const result = addMemberResult[0];
+      if (!result.success) {
+        console.error('add_member_to_group failed:', result.error_message);
+        return { success: false, message: result.error_message || 'Failed to add creator to group' };
+      }
+      memberPosition = result.position || preferredSlot;
+    }
+
+    // Update the newly added member's payment status
+    const { error: memberError } = await supabase
+      .from('group_members')
+      .update({
+        has_paid_security_deposit: true,
+        security_deposit_paid_at: new Date().toISOString(),
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+
+    if (memberError) {
+      console.error('Failed to update member payment status:', memberError);
+      return { success: false, message: 'Failed to update member payment status' };
+    }
+  } else {
+    // Creator is already a member - check if already paid (idempotency)
+    if (existingMember.has_paid_security_deposit) {
+      console.log('User has already paid, skipping duplicate processing');
+      return {
+        success: true,
+        message: 'Payment already processed',
+        position: existingMember.position,
+      };
+    }
+
+    memberPosition = existingMember.position;
+
+    // Update existing member's payment status
+    const { error: memberError } = await supabase
+      .from('group_members')
+      .update({
+        has_paid_security_deposit: true,
+        security_deposit_paid_at: new Date().toISOString(),
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+
+    if (memberError) {
+      console.error('Failed to update member payment status:', memberError);
+      return { success: false, message: 'Failed to update member payment status' };
+    }
   }
 
-  // Check if already paid (idempotency)
-  if (existingMember.has_paid_security_deposit) {
-    console.log('User has already paid, skipping duplicate processing');
-    return {
-      success: true,
-      message: 'Payment already processed',
-      position: existingMember.position,
-    };
-  }
-
-  // Update member payment status
-  const { error: memberError } = await supabase
-    .from('group_members')
-    .update({
-      has_paid_security_deposit: true,
-      security_deposit_paid_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId);
-
-  if (memberError) {
-    console.error('Failed to update member payment status:', memberError);
-    return { success: false, message: 'Failed to update member payment status' };
-  }
-
-  // Update first contribution to paid status
+  // Update or create first contribution record
   const { error: contribError } = await supabase
     .from('contributions')
-    .update({
+    .upsert({
+      group_id: groupId,
+      user_id: userId,
+      amount: group.contribution_amount,
+      cycle_number: FIRST_CYCLE_NUMBER,
       status: 'paid',
+      due_date: new Date().toISOString(),
       paid_date: new Date().toISOString(),
       transaction_ref: reference,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .eq('cycle_number', FIRST_CYCLE_NUMBER);
+    }, {
+      onConflict: 'group_id,user_id,cycle_number'
+    });
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
@@ -612,11 +667,11 @@ async function processGroupCreationPayment(
     true // isCreator
   );
 
-  console.log('Group creation payment processed successfully');
+  console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
   return {
     success: true,
     message: 'Group creation payment processed successfully',
-    position: existingMember.position,
+    position: memberPosition,
   };
 }
 
