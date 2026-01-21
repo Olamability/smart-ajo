@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
@@ -26,6 +26,7 @@ export default function PaymentSuccessPage() {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get payment reference and group ID from URL query params
   // Paystack may send either 'reference' or 'trxref' depending on callback configuration
@@ -58,8 +59,8 @@ export default function PaymentSuccessPage() {
         toast.success('Payment verified! Your transaction is complete.');
       } else {
         // Check if the error is due to session expiration
-        if (result.payment_status === 'unauthorized' && 
-            (result.error?.includes('Session') || result.error?.includes('expired'))) {
+        // Use the specific payment_status field to avoid fragile string matching
+        if (result.payment_status === 'unauthorized') {
           setVerificationStatus('failed');
           setVerificationMessage(
             result.message || 
@@ -68,8 +69,9 @@ export default function PaymentSuccessPage() {
           toast.info('Refreshing session to verify your payment...', { duration: 3000 });
           
           // Auto-refresh the page after 3 seconds to get a fresh session
-          setTimeout(() => {
-            window.location.reload();
+          // Using navigate(0) for a cleaner refresh with React Router
+          refreshTimeoutRef.current = setTimeout(() => {
+            navigate(0);
           }, 3000);
         } else {
           setVerificationStatus('failed');
@@ -93,7 +95,16 @@ export default function PaymentSuccessPage() {
       handleVerifyPayment();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference, verificationStatus]);
+  }, [reference, navigate]);
+
+  // Cleanup timeout on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
