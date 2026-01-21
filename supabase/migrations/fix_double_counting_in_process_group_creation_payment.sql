@@ -101,9 +101,6 @@ BEGIN
     TRUE
   );
 
-  -- NOTE: The update_group_member_count trigger will automatically increment current_members
-  -- No need to manually update it here to avoid double-counting
-
   -- Create the first contribution record
   INSERT INTO contributions (
     group_id,
@@ -155,7 +152,8 @@ BEGIN
     NOW()
   );
 
-  -- No manual current_members increment - the trigger handles it!
+  -- IMPORTANT: The update_group_member_count trigger automatically increments current_members
+  -- when a member is inserted into group_members. No manual update needed to avoid double-counting.
 
   RETURN QUERY SELECT TRUE, 'Group creation payment processed successfully'::TEXT;
 
