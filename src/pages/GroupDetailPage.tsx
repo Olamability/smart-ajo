@@ -111,6 +111,7 @@ export default function GroupDetailPage() {
         loadMembers();
         loadGroupDetails();
         loadJoinRequests();
+        loadUserJoinRequestStatus();
       }
     };
 
