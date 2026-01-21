@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { 
   getGroupById, 
   getGroupMembers, 
-  updateSecurityDepositPayment, 
   joinGroup,
   getPendingJoinRequests,
   approveJoinRequest,
@@ -14,7 +13,6 @@ import {
 import {
   initializeGroupCreationPayment,
   initializeGroupJoinPayment,
-  verifyPayment,
 } from '@/api/payments';
 import type { Group, GroupMember } from '@/types';
 import { paystackService, PaystackResponse } from '@/lib/paystack';
@@ -60,7 +58,6 @@ import {
   Phone,
   User,
   CreditCard,
-  Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -73,6 +70,7 @@ interface JoinRequest {
   user_id: string;
   user_name: string;
   user_email: string;
+  preferred_slot: number | null;
   message: string | null;
   created_at: string;
 }
@@ -234,6 +232,8 @@ export default function GroupDetailPage() {
       }
 
       // Open Paystack payment popup
+      // Using callback_url to redirect user to payment success page after payment
+      // This ensures proper session handling and backend verification
       await paystackService.initializePayment({
         email: user.email!,
         amount: totalAmount * 100, // Convert to kobo
@@ -245,57 +245,19 @@ export default function GroupDetailPage() {
           preferred_slot: currentUserMember.rotationPosition,
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
-        callback: async (response: PaystackResponse) => {
-          try {
-            // Payment successful, verify on backend
-            if (response.status === 'success') {
-              toast.info('Payment received! Verifying with backend...', {
-                duration: 5000,
-              });
-              
-              // Verify payment with backend (with retry logic)
-              // Backend now handles updating payment status
-              const verifyResult = await verifyPayment(response.reference);
-              
-              console.log('Verification result:', verifyResult);
-              
-              if (verifyResult.verified && verifyResult.success) {
-                // Backend has already processed everything
-                toast.success('Payment verified! Your membership is now fully active.');
-                // Reload data to reflect payment status
-                await loadGroupDetails();
-                await loadMembers();
-              } else {
-                console.error('Payment verification failed:', verifyResult);
-                
-                // Provide detailed error message based on verification result
-                let errorMessage = 'Payment verification failed.';
-                if (verifyResult.payment_status === 'verification_failed') {
-                  errorMessage = 'Unable to verify payment with Paystack. Please contact support with reference: ' + response.reference;
-                } else if (verifyResult.payment_status === 'failed') {
-                  errorMessage = 'Payment was declined by your bank. Please try again.';
-                } else if (verifyResult.error || verifyResult.message) {
-                  errorMessage = `${verifyResult.message || verifyResult.error}. Reference: ${response.reference}`;
-                } else {
-                  errorMessage = `Payment status: ${verifyResult.payment_status}. Please contact support with reference: ${response.reference}`;
-                }
-                
-                toast.error(errorMessage, { duration: 10000 });
-              }
-            } else {
-              toast.error('Payment was not successful');
-            }
-          } catch (error) {
-            console.error('Error in payment callback:', error);
-            toast.error(
-              'An error occurred while processing your payment. Please contact support with reference: ' + response.reference,
-              { duration: 10000 }
-            );
-          } finally {
-            setIsProcessingPayment(false);
+        callback: (response: PaystackResponse) => {
+          // Payment modal closed - Paystack will redirect to callback_url
+          // The PaymentSuccessPage will handle verification with proper session management
+          if (response.status === 'success') {
+            toast.info('Payment received! Redirecting to verification...', {
+              duration: 3000,
+            });
           }
+          // Don't process here - let callback_url page handle everything
+          setIsProcessingPayment(false);
         },
         onClose: () => {
+          // User closed payment modal without completing
           toast.info('Payment cancelled');
           setIsProcessingPayment(false);
         },
@@ -407,8 +369,8 @@ export default function GroupDetailPage() {
     );
   };
 
-  // Helper function to determine if user has approved join request
-  const hasApprovedJoinRequest = () => {
+  // Helper function to determine if user has approved join request (for future use)
+  const _hasApprovedJoinRequest = () => {
     return (
       userJoinRequest &&
       userJoinRequest.status === 'approved' &&
@@ -910,11 +872,20 @@ export default function GroupDetailPage() {
                     {joinRequests.map((request) => (
                       <div key={request.id} className="flex items-center gap-3 p-3 border rounded-lg bg-yellow-50 border-yellow-200">
                         <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                          <Clock className="w-5 h-5 text-yellow-600" />
+                          {request.preferred_slot ? (
+                            <span className="font-semibold text-yellow-700">#{request.preferred_slot}</span>
+                          ) : (
+                            <Clock className="w-5 h-5 text-yellow-600" />
+                          )}
                         </div>
                         <div className="flex-1">
                           <p className="font-medium">{request.user_name}</p>
                           <p className="text-sm text-muted-foreground">{request.user_email}</p>
+                          {request.preferred_slot && (
+                            <p className="text-sm font-medium text-yellow-700 mt-1">
+                              Requested Position: #{request.preferred_slot}
+                            </p>
+                          )}
                           {request.message && (
                             <p className="text-sm text-muted-foreground mt-1 italic">"{request.message}"</p>
                           )}
