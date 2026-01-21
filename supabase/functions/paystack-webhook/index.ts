@@ -716,8 +716,9 @@ async function processGroupJoinPayment(
     }
 
     // Check if the function returned success
-    if (!addMemberResult || addMemberResult.length === 0) {
-      console.error('add_member_to_group returned no result - unexpected behavior');
+    if (!addMemberResult || !Array.isArray(addMemberResult) || addMemberResult.length === 0) {
+      console.error('add_member_to_group returned no result or invalid result - unexpected behavior');
+      console.error('Result type:', typeof addMemberResult, 'Is array:', Array.isArray(addMemberResult));
       return { success: false, message: 'Failed to add user to group - no result returned' };
     }
     
@@ -746,6 +747,7 @@ async function processGroupJoinPayment(
   }
 
   // Update or create first contribution record
+  const currentTime = new Date().toISOString();
   const { error: contribError } = await supabase
     .from('contributions')
     .upsert({
@@ -754,10 +756,11 @@ async function processGroupJoinPayment(
       amount: group.contribution_amount,
       cycle_number: FIRST_CYCLE_NUMBER,
       status: 'paid',
-      due_date: new Date().toISOString(),
-      paid_date: new Date().toISOString(),
+      due_date: currentTime,
+      paid_date: currentTime,
       transaction_ref: reference,
-      updated_at: new Date().toISOString(),
+      created_at: currentTime, // For audit trail consistency
+      updated_at: currentTime,
     }, {
       onConflict: 'group_id,user_id,cycle_number'
     });
