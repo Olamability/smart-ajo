@@ -551,7 +551,8 @@ async function processGroupCreationPayment(
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
-    return { success: false, message: 'Failed to update contribution record' };
+    // Non-fatal for group creation - member is already set up with payment status
+    // The contribution record can be fixed later if needed
   }
 
   // Create transaction records
@@ -566,8 +567,9 @@ async function processGroupCreationPayment(
   );
 
   if (!txSuccess) {
-    console.error('Failed to create transaction records');
-    return { success: false, message: 'Failed to create transaction records' };
+    console.error('Failed to create transaction records - payment processed but audit trail incomplete');
+    // Non-fatal - payment status is already updated correctly
+    // Transaction records are for audit purposes and can be fixed later
   }
 
   console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
@@ -669,7 +671,8 @@ async function processGroupJoinPayment(
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
-    return { success: false, message: 'Failed to update contribution record' };
+    // Non-fatal for group join - member payment status is already updated
+    // The contribution record can be fixed later if needed
   }
 
   // Create transaction records
@@ -684,8 +687,9 @@ async function processGroupJoinPayment(
   );
 
   if (!txSuccess) {
-    console.error('Failed to create transaction records');
-    return { success: false, message: 'Failed to create transaction records' };
+    console.error('Failed to create transaction records - payment processed but audit trail incomplete');
+    // Non-fatal - payment status is already updated correctly
+    // Transaction records are for audit purposes and can be fixed later
   }
 
   // Update join request status to 'joined' if it exists
@@ -701,7 +705,8 @@ async function processGroupJoinPayment(
 
   if (joinReqError) {
     console.error('Failed to update join request:', joinReqError);
-    return { success: false, message: 'Failed to update join request status' };
+    // Non-fatal - the core payment processing succeeded
+    // Join request status update is a secondary operation
   }
 
   console.log('Group join payment processed successfully');
