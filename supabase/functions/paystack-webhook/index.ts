@@ -551,11 +551,11 @@ async function processGroupCreationPayment(
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
-    // Non-fatal, continue
+    return { success: false, message: 'Failed to update contribution record' };
   }
 
   // Create transaction records
-  await createPaymentTransactions(
+  const txSuccess = await createPaymentTransactions(
     supabase,
     groupId,
     userId,
@@ -564,6 +564,11 @@ async function processGroupCreationPayment(
     group.contribution_amount,
     true // isCreator
   );
+
+  if (!txSuccess) {
+    console.error('Failed to create transaction records');
+    return { success: false, message: 'Failed to create transaction records' };
+  }
 
   console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
   return { success: true, message: 'Group creation payment processed successfully' };
@@ -664,11 +669,11 @@ async function processGroupJoinPayment(
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
-    // Non-fatal, continue
+    return { success: false, message: 'Failed to update contribution record' };
   }
 
   // Create transaction records
-  await createPaymentTransactions(
+  const txSuccess = await createPaymentTransactions(
     supabase,
     groupId,
     userId,
@@ -677,6 +682,11 @@ async function processGroupJoinPayment(
     group.contribution_amount,
     false // isCreator
   );
+
+  if (!txSuccess) {
+    console.error('Failed to create transaction records');
+    return { success: false, message: 'Failed to create transaction records' };
+  }
 
   // Update join request status to 'joined' if it exists
   const { error: joinReqError } = await supabase
@@ -691,7 +701,7 @@ async function processGroupJoinPayment(
 
   if (joinReqError) {
     console.error('Failed to update join request:', joinReqError);
-    // Non-fatal, continue
+    return { success: false, message: 'Failed to update join request status' };
   }
 
   console.log('Group join payment processed successfully');
