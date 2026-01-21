@@ -64,7 +64,7 @@ test_cors_headers() {
 }
 
 # Test all functions
-FUNCTIONS=("verify-payment" "paystack-webhook" "send-email" "verify-bvn")
+FUNCTIONS=("verify-payment" "paystack-webhook" "send-email" "verify-bvn" "health-check")
 FAILED=0
 
 for func in "${FUNCTIONS[@]}"; do
