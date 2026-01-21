@@ -94,9 +94,54 @@ smart-ajo/
 ├── supabase/              # Backend (Supabase)
 │   ├── migrations/        # Database migrations
 │   ├── functions/         # Edge functions
+│   │   ├── health-check/  # System health monitoring
+│   │   ├── verify-payment/ # Payment verification
+│   │   ├── paystack-webhook/ # Webhook handler
+│   │   ├── send-email/    # Email notifications
+│   │   └── verify-bvn/    # BVN verification
 │   └── schema.sql         # Database schema
 ├── public/                # Static assets
 └── docs/                  # Documentation
+```
+
+### Health Check Endpoint
+
+The application includes a health check endpoint for monitoring system status:
+
+**Endpoint:** `GET /functions/v1/health-check`
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-01-21T14:00:00.000Z",
+  "version": "1.0.0",
+  "components": {
+    "database": { "status": "operational", "responseTime": 45 },
+    "auth": { "status": "operational", "responseTime": 120 },
+    "edgeFunctions": { "status": "operational" }
+  }
+}
+```
+
+**Status Values:**
+- `healthy` - All components operational
+- `degraded` - Some components degraded but functional
+- `unhealthy` - Critical components down
+
+**Use Cases:**
+- Load balancer health checks
+- Monitoring and alerting
+- Deployment verification
+- System diagnostics
+
+**Testing:**
+```bash
+# Test locally (requires Supabase CLI)
+supabase functions serve health-check
+
+# Test deployed function
+curl https://YOUR_PROJECT.supabase.co/functions/v1/health-check
 ```
 
 ## 🔧 Common Issues and Solutions

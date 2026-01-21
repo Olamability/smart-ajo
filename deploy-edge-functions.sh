@@ -26,6 +26,7 @@ FUNCTIONS=(
   "paystack-webhook"
   "send-email"
   "verify-bvn"
+  "health-check"
 )
 
 echo -e "${YELLOW}========================================${NC}"

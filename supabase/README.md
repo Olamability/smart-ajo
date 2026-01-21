@@ -2,6 +2,16 @@
 
 This directory contains SQL files for setting up the Secured-Ajo database on Supabase.
 
+## Directory Structure
+
+- **SQL Files**: Database schema, functions, and migrations
+- **functions/**: Edge Functions for serverless backend logic
+  - `health-check/`: Application health monitoring endpoint
+  - `verify-payment/`: Payment verification with Paystack
+  - `paystack-webhook/`: Webhook handler for Paystack events
+  - `send-email/`: Email notification service
+  - `verify-bvn/`: BVN verification service
+
 ## Quick Start
 
 ### 1. Run SQL Files in Order
@@ -157,6 +167,44 @@ See these files for more information:
 - **FIX_SUMMARY.md** (in repository root) - User-friendly overview
 - **SUPABASE_SETUP.md** (in repository root) - Detailed technical guide
 - **verify-setup.sql** (this directory) - Automated verification
+
+## Edge Functions
+
+The repository includes several Edge Functions for backend operations:
+
+### health-check
+- **Purpose**: System health monitoring endpoint
+- **Method**: GET
+- **Authentication**: None (public endpoint)
+- **Response**: JSON with system status and component health
+- **Usage**: Monitoring, load balancer health checks
+
+Example:
+```bash
+curl https://YOUR_PROJECT.supabase.co/functions/v1/health-check
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-01-21T14:00:00.000Z",
+  "version": "1.0.0",
+  "components": {
+    "database": { "status": "operational", "responseTime": 45 },
+    "auth": { "status": "operational", "responseTime": 120 },
+    "edgeFunctions": { "status": "operational" }
+  }
+}
+```
+
+### Other Edge Functions
+- **verify-payment**: Verifies Paystack payment transactions
+- **paystack-webhook**: Handles Paystack webhook events
+- **send-email**: Sends transactional emails
+- **verify-bvn**: Verifies Bank Verification Numbers
+
+For deployment instructions, see `../check-edge-functions.sh` and `../deploy-edge-functions.sh`.
 
 ## Testing
 
