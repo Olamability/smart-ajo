@@ -213,7 +213,18 @@ export default function GroupDetailPage() {
   };
 
   const handlePaySecurityDeposit = async () => {
-    if (!group || !user || !id || !currentUserMember) return;
+    // For creators: require selectedSlot, for members: require currentUserMember
+    if (!group || !user || !id) return;
+    
+    if (isCreator && !selectedSlot) {
+      toast.error('Please select a payout slot before making payment');
+      return;
+    }
+    
+    if (!isCreator && !currentUserMember) {
+      toast.error('Unable to process payment. Please try again or contact support.');
+      return;
+    }
 
     setIsProcessingPayment(true);
     try {
@@ -231,6 +242,9 @@ export default function GroupDetailPage() {
         return;
       }
 
+      // Get preferred slot: from selectedSlot for creators, from member position for others
+      const preferredSlot = isCreator ? selectedSlot : currentUserMember?.rotationPosition;
+
       // Open Paystack payment popup
       // Using callback_url to redirect user to payment success page after payment
       // This ensures proper session handling and backend verification
@@ -242,7 +256,7 @@ export default function GroupDetailPage() {
           type: isCreator ? 'group_creation' : 'group_join',
           group_id: id,
           user_id: user.id,
-          preferred_slot: currentUserMember.rotationPosition,
+          preferred_slot: preferredSlot,
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
         callback: (response: PaystackResponse) => {
@@ -439,30 +453,70 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Status Alert - Show payment prompt for group creator who hasn't paid */}
-        {isCreator && currentUserMember && !currentUserMember.securityDepositPaid && group?.status === 'forming' && (
-          <Alert className="bg-orange-50 border-orange-200">
-            <AlertCircle className="h-4 w-4 text-orange-600" />
-            <AlertDescription className="flex items-center justify-between">
-              <div>
+        {isCreator && !currentUserMember && group?.status === 'forming' && (
+          <div className="space-y-4">
+            <Alert className="bg-orange-50 border-orange-200">
+              <AlertCircle className="h-4 w-4 text-orange-600" />
+              <AlertDescription>
                 <span className="text-orange-900 font-semibold">
-                  Complete Your Security Deposit Payment
+                  Complete Your Group Setup
                 </span>
                 <p className="text-sm text-orange-700 mt-1">
-                  You are now a member of this group but need to complete your security deposit payment 
-                  (security deposit + first contribution) to fully activate your membership and allow the group to begin.
+                  As the group creator, you need to select your payout slot and complete your payment 
+                  (security deposit + first contribution) to activate the group.
                 </p>
-              </div>
-              <Button
-                onClick={handlePaySecurityDeposit}
-                disabled={isProcessingPayment}
-                size="sm"
-                className="ml-4"
-              >
-                <CreditCard className="w-4 h-4 mr-2" />
-                Pay Now
-              </Button>
-            </AlertDescription>
-          </Alert>
+              </AlertDescription>
+            </Alert>
+            
+            {/* Slot Selection for Creator */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Select Your Payout Slot</CardTitle>
+                <CardDescription>
+                  Choose when you'd like to receive your payout in the rotation cycle
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <SlotSelector
+                  groupId={id}
+                  selectedSlot={selectedSlot}
+                  onSlotSelect={setSelectedSlot}
+                  disabled={isProcessingPayment}
+                />
+                
+                {selectedSlot && (
+                  <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      <span className="text-green-900 font-semibold">
+                        Slot {selectedSlot} Selected
+                      </span>
+                    </div>
+                    <p className="text-sm text-green-700 mt-1">
+                      You'll receive your payout during cycle {selectedSlot}
+                    </p>
+                    <Button
+                      onClick={handlePaySecurityDeposit}
+                      disabled={isProcessingPayment}
+                      className="mt-3 w-full"
+                    >
+                      {isProcessingPayment ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        <>
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* Status Alert - Show payment prompt for members who haven't paid */}

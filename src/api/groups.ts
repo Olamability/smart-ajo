@@ -72,11 +72,11 @@ export const createGroup = async (
       return { success: false, error: error.message };
     }
 
-    // NOTE: Creator is now automatically added as member via database trigger
-    // The trigger adds them immediately with position 1 and status 'active'
-    // Payment is tracked separately and not required for membership
+    // NOTE: Creator is NO LONGER automatically added as member via database trigger
+    // The creator will be added as a member after completing payment with their selected slot
+    // This allows creators to choose their preferred payout position
 
-    // Fetch the updated group data to get the correct current_members count
+    // Fetch the updated group data to get the correct current_members count (should be 0)
     const { data: updatedGroupData, error: fetchError } = await supabase
       .from('groups')
       .select('*')
@@ -102,7 +102,7 @@ export const createGroup = async (
         contributionAmount: finalGroupData.contribution_amount,
         frequency: finalGroupData.frequency,
         totalMembers: finalGroupData.total_members,
-        currentMembers: finalGroupData.current_members || 1, // Creator is now a member
+        currentMembers: finalGroupData.current_members || 0, // Show 0 until creator completes payment
         securityDepositAmount: finalGroupData.security_deposit_amount,
         securityDepositPercentage: finalGroupData.security_deposit_percentage,
         status: finalGroupData.status,

@@ -102,8 +102,8 @@ export default function CreateGroupPage() {
       });
 
       if (result.success && result.group) {
-        toast.success('Group created successfully! You are now the admin. Please make your security deposit payment to activate the group.');
-        // Navigate to the group detail page where creator can make payment
+        toast.success('Group created successfully! Please select your payout slot and complete payment to activate the group.');
+        // Navigate to the group detail page where creator can select slot and make payment
         navigate(`/groups/${result.group.id}`);
       } else {
         toast.error(result.error || 'Failed to create group');

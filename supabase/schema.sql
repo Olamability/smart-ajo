@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS groups (
   contribution_amount DECIMAL(15, 2) NOT NULL CHECK (contribution_amount > 0),
   frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
   total_members INTEGER NOT NULL CHECK (total_members >= 2 AND total_members <= 50),
-  current_members INTEGER DEFAULT 1 CHECK (current_members >= 0 AND current_members <= total_members),
+  current_members INTEGER DEFAULT 0 CHECK (current_members >= 0 AND current_members <= total_members),
   
   -- Security & Fees
   security_deposit_amount DECIMAL(15, 2) NOT NULL CHECK (security_deposit_amount >= 0),
