@@ -61,18 +61,17 @@ export default function PaymentSuccessPage() {
         // Check if the error is due to session expiration
         // Use the specific payment_status field to avoid fragile string matching
         if (result.payment_status === 'unauthorized') {
-          setVerificationStatus('failed');
+          setVerificationStatus('verifying'); // Keep showing verifying state during refresh
           setVerificationMessage(
-            result.message || 
-            'Your session expired. The page will refresh automatically to reconnect. Your payment was successful.'
+            'Your payment was successful! Refreshing your session to complete verification...'
           );
-          toast.info('Refreshing session to verify your payment...', { duration: 3000 });
+          toast.success('Payment completed! Reconnecting to verify...', { duration: 3000 });
           
-          // Auto-refresh the page after 3 seconds to get a fresh session
+          // Auto-refresh the page after 2 seconds to get a fresh session
           // Using navigate(0) for a cleaner refresh with React Router
           refreshTimeoutRef.current = setTimeout(() => {
             navigate(0);
-          }, 3000);
+          }, 2000);
         } else {
           setVerificationStatus('failed');
           setVerificationMessage(result.message || result.error || 'Payment verification failed');
@@ -152,7 +151,7 @@ export default function PaymentSuccessPage() {
           {/* Status Message */}
           {verificationStatus === 'verifying' && (
             <p className="text-sm text-muted-foreground text-center">
-              Please wait while we verify your payment and process your membership...
+              {verificationMessage || 'Please wait while we verify your payment and process your membership...'}
             </p>
           )}
           {verificationStatus === 'verified' && (

@@ -693,3 +693,18 @@ COMMENT ON TRIGGER trigger_update_group_member_count ON group_members IS
   'Automatically updates the current_members count in groups table when members join or leave';
 
 -- ============================================================================
+-- TRIGGER: Auto-add creator as member on group creation
+-- ============================================================================
+-- Automatically adds the group creator as the first member when a group is created
+-- This ensures consistency and eliminates the need for manual member addition
+-- ============================================================================
+
+CREATE TRIGGER trigger_auto_add_creator
+AFTER INSERT ON groups
+FOR EACH ROW
+EXECUTE FUNCTION auto_add_creator_as_member();
+
+COMMENT ON TRIGGER trigger_auto_add_creator ON groups IS 
+  'Automatically adds the group creator as first member with position 1 when group is created';
+
+-- ============================================================================
