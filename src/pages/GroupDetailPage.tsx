@@ -119,7 +119,6 @@ export default function GroupDetailPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadGroupDetails = async () => {
