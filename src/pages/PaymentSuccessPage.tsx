@@ -9,6 +9,9 @@ import { toast } from 'sonner';
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
 
+// Default messages for different states
+const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
+
 /**
  * PaymentSuccessPage - Callback URL page for payment redirects
  * 
@@ -151,7 +154,7 @@ export default function PaymentSuccessPage() {
           {/* Status Message */}
           {verificationStatus === 'verifying' && (
             <p className="text-sm text-muted-foreground text-center">
-              {verificationMessage || 'Please wait while we verify your payment and process your membership...'}
+              {verificationMessage || DEFAULT_VERIFYING_MESSAGE}
             </p>
           )}
           {verificationStatus === 'verified' && (

@@ -96,8 +96,11 @@ BEGIN
   );
 
   -- REMOVED: Manual current_members increment
-  -- The trigger_update_group_member_count AFTER INSERT trigger will increment it
-  -- This prevents double counting
+  -- This FIXES the double counting bug where:
+  --   1. This function manually incremented current_members
+  --   2. The trigger_update_group_member_count ALSO incremented on INSERT
+  --   Result: Every member addition counted TWICE (e.g., 0 → 2 instead of 0 → 1)
+  -- Now we rely solely on the trigger for consistent, single-source-of-truth counting
 
   -- Create pending contribution record for the first cycle
   -- (will be marked as paid when payment is verified)
