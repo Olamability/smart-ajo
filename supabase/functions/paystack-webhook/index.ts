@@ -619,13 +619,15 @@ async function processGroupJoinPayment(
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
+  // Parse preferred_slot as integer - Paystack may send it as string
+  const preferredSlot = metadata?.preferred_slot ? parseInt(String(metadata.preferred_slot), 10) : null;
 
   if (!userId || !groupId) {
     console.error('Missing required metadata:', { userId, groupId });
     return { success: false, message: 'Missing required metadata for group join' };
   }
 
-  console.log(`Processing group join payment for user ${userId} in group ${groupId}`);
+  console.log(`Processing group join payment for user ${userId} in group ${groupId}, preferred slot: ${preferredSlot}`);
 
   // Get group details
   const { data: group, error: groupError } = await supabase
@@ -648,53 +650,113 @@ async function processGroupJoinPayment(
     };
   }
 
-  // Check if user is a member (should be, as they're added on join approval)
+  // Check if user is already a member
+  // NEW FLOW: User is NOT added as member on approval - they're added here after payment
+  // OLD FLOW: User WAS added as member on approval - just update payment status
   const { data: existingMember } = await supabase
     .from('group_members')
-    .select('id, position, has_paid_security_deposit')
+    .select('id, position, has_paid_security_deposit, status')
     .eq('group_id', groupId)
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (!existingMember) {
-    console.error('User is not a member of the group - this should not happen');
-    return { success: false, message: 'User is not a member of this group' };
+  if (existingMember) {
+    // User is already a member - check if already paid (idempotency)
+    if (existingMember.has_paid_security_deposit) {
+      console.log('Group join payment already processed for reference:', reference);
+      return { success: true, message: 'Payment already processed (duplicate webhook)' };
+    }
+
+    // Update existing member's payment status
+    const { error: memberError } = await supabase
+      .from('group_members')
+      .update({
+        has_paid_security_deposit: true,
+        security_deposit_paid_at: new Date().toISOString(),
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+
+    if (memberError) {
+      console.error('Failed to update member payment status:', memberError);
+      return { success: false, message: 'Failed to update member payment status' };
+    }
+  } else {
+    // User is NOT a member yet - add them now (NEW FLOW)
+    console.log(`Adding user as member with payment (NEW FLOW)`);
+    
+    // Get preferred slot from join request
+    let slotToAssign = preferredSlot;
+    if (!slotToAssign) {
+      const { data: joinRequest } = await supabase
+        .from('group_join_requests')
+        .select('preferred_slot')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .eq('status', 'approved')
+        .maybeSingle();
+      
+      slotToAssign = joinRequest?.preferred_slot || null;
+    }
+    
+    // Call add_member_to_group function to add user with their preferred slot
+    const { data: addMemberResult, error: addMemberError } = await supabase
+      .rpc('add_member_to_group', {
+        p_group_id: groupId,
+        p_user_id: userId,
+        p_is_creator: false,
+        p_preferred_slot: slotToAssign
+      });
+
+    if (addMemberError) {
+      console.error('Failed to add user as member:', addMemberError);
+      return { success: false, message: 'Failed to add user to group' };
+    }
+
+    // Check if the function returned success
+    if (addMemberResult && addMemberResult.length > 0) {
+      const result = addMemberResult[0];
+      if (!result.success) {
+        console.error('add_member_to_group failed:', result.error_message);
+        return { success: false, message: result.error_message || 'Failed to add user to group' };
+      }
+    }
+
+    // Update the newly added member's payment status
+    const { error: memberError } = await supabase
+      .from('group_members')
+      .update({
+        has_paid_security_deposit: true,
+        security_deposit_paid_at: new Date().toISOString(),
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('group_id', groupId)
+      .eq('user_id', userId);
+
+    if (memberError) {
+      console.error('Failed to update member payment status:', memberError);
+      return { success: false, message: 'Failed to update member payment status' };
+    }
   }
 
-  // Check if already paid (idempotency)
-  if (existingMember.has_paid_security_deposit) {
-    console.log('Group join payment already processed for reference:', reference);
-    return { success: true, message: 'Payment already processed (duplicate webhook)' };
-  }
-
-  // Update member payment status
-  const { error: memberError } = await supabase
-    .from('group_members')
-    .update({
-      has_paid_security_deposit: true,
-      security_deposit_paid_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId);
-
-  if (memberError) {
-    console.error('Failed to update member payment status:', memberError);
-    return { success: false, message: 'Failed to update member payment status' };
-  }
-
-  // Update first contribution to paid status
+  // Update or create first contribution record
   const { error: contribError } = await supabase
     .from('contributions')
-    .update({
+    .upsert({
+      group_id: groupId,
+      user_id: userId,
+      amount: group.contribution_amount,
+      cycle_number: FIRST_CYCLE_NUMBER,
       status: 'paid',
+      due_date: new Date().toISOString(),
       paid_date: new Date().toISOString(),
       transaction_ref: reference,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('group_id', groupId)
-    .eq('user_id', userId)
-    .eq('cycle_number', FIRST_CYCLE_NUMBER);
+    }, {
+      onConflict: 'group_id,user_id,cycle_number'
+    });
 
   if (contribError) {
     console.error('Failed to update contribution:', contribError);
