@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { 
   getGroupById, 
   getGroupMembers, 
-  updateSecurityDepositPayment, 
   joinGroup,
   getPendingJoinRequests,
   approveJoinRequest,
@@ -14,7 +13,6 @@ import {
 import {
   initializeGroupCreationPayment,
   initializeGroupJoinPayment,
-  verifyPayment,
 } from '@/api/payments';
 import type { Group, GroupMember } from '@/types';
 import { paystackService, PaystackResponse } from '@/lib/paystack';
@@ -60,7 +58,6 @@ import {
   Phone,
   User,
   CreditCard,
-  Info,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -372,8 +369,8 @@ export default function GroupDetailPage() {
     );
   };
 
-  // Helper function to determine if user has approved join request
-  const hasApprovedJoinRequest = () => {
+  // Helper function to determine if user has approved join request (for future use)
+  const _hasApprovedJoinRequest = () => {
     return (
       userJoinRequest &&
       userJoinRequest.status === 'approved' &&
