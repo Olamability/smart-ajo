@@ -293,9 +293,11 @@ serve(async (req) => {
     );
   } catch (error) {
     console.error('===== HEALTH CHECK ERROR =====');
-    console.error('Error type:', error.constructor?.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
+    console.error('Error type:', error?.constructor?.name);
+    console.error('Error message:', error instanceof Error ? error.message : String(error));
+    if (error instanceof Error && error.stack) {
+      console.error('Error stack:', error.stack);
+    }
     console.error('===== END ERROR =====');
     
     const response: HealthCheckResponse = {
