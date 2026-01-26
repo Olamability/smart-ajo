@@ -109,7 +109,9 @@ export default function GroupDetailPage() {
   // This effect runs when the location state indicates return from payment
   useEffect(() => {
     const fromPayment = location.state?.fromPayment;
+    const timestamp = location.state?.timestamp;
     if (id && fromPayment) {
+      console.log('Reloading data after payment verification...');
       // Reload all data when returning from payment
       loadGroupDetails();
       loadMembers();
@@ -120,7 +122,7 @@ export default function GroupDetailPage() {
       navigate(location.pathname, { replace: true, state: {} });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state?.fromPayment, id]);
+  }, [location.state?.fromPayment, location.state?.timestamp, id]);
 
   // Reload members data when page regains focus (e.g., after payment)
   useEffect(() => {

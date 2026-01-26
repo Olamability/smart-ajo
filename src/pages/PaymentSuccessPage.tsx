@@ -110,7 +110,11 @@ export default function PaymentSuccessPage() {
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
     if (groupId) {
-      navigate(`/groups/${groupId}`, { state: { fromPayment: true } });
+      // Add a small delay to ensure backend processing is complete
+      // Force a timestamp to ensure the state change is always detected
+      setTimeout(() => {
+        navigate(`/groups/${groupId}`, { state: { fromPayment: true, timestamp: Date.now() } });
+      }, 500); // 500ms delay to ensure database updates have propagated
     } else {
       navigate('/dashboard');
     }
