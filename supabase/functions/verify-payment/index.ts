@@ -532,7 +532,7 @@ serve(async (req) => {
           };
         }
 
-        if (businessLogicResult && !businessLogicResult.success) {
+        if (businessLogicResult?.success === false) {
           console.error('Business logic processing failed:', businessLogicResult.message);
           // Payment is verified but business logic failed
           // Return error but don't fail the verification itself
@@ -592,15 +592,19 @@ serve(async (req) => {
     console.log('Payment verified and processed successfully');
     console.log('===== PAYMENT VERIFICATION END =====');
 
+    // Determine overall success: payment verified AND business logic succeeded (or not required)
+    const paymentVerified = verificationResponse.data.status === 'success';
+    const businessLogicSucceeded = businessLogicResult === null || businessLogicResult.success === true;
+    const overallSuccess = paymentVerified && businessLogicSucceeded;
+
     // Return verification result with business logic status
     return new Response(
       JSON.stringify({
-        success: verificationResponse.data.status === 'success' && 
-                (businessLogicResult === null || businessLogicResult.success === true),
+        success: overallSuccess,
         payment_status: verificationResponse.data.status,
-        verified: verificationResponse.data.status === 'success',
+        verified: paymentVerified,
         amount: verificationResponse.data.amount,
-        message: businessLogicResult?.message || (verificationResponse.data.status === 'success' 
+        message: businessLogicResult?.message || (paymentVerified 
           ? 'Payment verified and processed successfully' 
           : 'Payment verification completed'),
         position: businessLogicResult?.position, // Include position for group payments
