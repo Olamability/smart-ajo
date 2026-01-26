@@ -514,9 +514,10 @@ serve(async (req) => {
         } else if (paymentType === 'group_join') {
           businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
         } else if (paymentType === 'contribution' || paymentType === 'security_deposit') {
-          // These types are handled by the webhook only
-          // They don't need immediate processing
-          console.log(`Payment type '${paymentType}' will be processed by webhook`);
+          // These legacy payment types are for standalone contributions and deposits
+          // They don't have immediate processing requirements and are handled by webhook
+          // Modern flow uses 'group_creation' and 'group_join' types instead
+          console.log(`Legacy payment type '${paymentType}' will be processed by webhook`);
           businessLogicResult = { 
             success: true, 
             message: 'Payment verified. Business logic will be processed by webhook.' 
@@ -594,7 +595,8 @@ serve(async (req) => {
     // Return verification result with business logic status
     return new Response(
       JSON.stringify({
-        success: verificationResponse.data.status === 'success' && (businessLogicResult?.success !== false),
+        success: verificationResponse.data.status === 'success' && 
+                (businessLogicResult === null || businessLogicResult.success === true),
         payment_status: verificationResponse.data.status,
         verified: verificationResponse.data.status === 'success',
         amount: verificationResponse.data.amount,

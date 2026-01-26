@@ -9,6 +9,10 @@
  * This ensures both paths execute the same business logic reliably.
  */
 
+// Type for Supabase client - using any for compatibility with Deno edge functions
+// In Deno edge runtime, we use service role client which doesn't have strict typing
+type SupabaseClient = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
 // Constants
 const FIRST_CYCLE_NUMBER = 1;
 
@@ -16,7 +20,7 @@ const FIRST_CYCLE_NUMBER = 1;
  * Helper function to create payment transactions for group payments
  */
 export async function createPaymentTransactions(
-  supabase: any,
+  supabase: SupabaseClient,
   groupId: string,
   userId: string,
   reference: string,
@@ -61,7 +65,7 @@ export async function createPaymentTransactions(
  * Adds creator as member with selected slot and updates payment status
  */
 export async function processGroupCreationPayment(
-  supabase: any,
+  supabase: SupabaseClient,
   paymentData: {
     reference: string;
     amount: number;
@@ -269,7 +273,7 @@ export async function processGroupCreationPayment(
  * Updates payment status for member who is already added to the group
  */
 export async function processGroupJoinPayment(
-  supabase: any,
+  supabase: SupabaseClient,
   paymentData: {
     reference: string;
     amount: number;
