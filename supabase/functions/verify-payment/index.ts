@@ -209,8 +209,13 @@ async function storePaymentRecord(
         message: 'Failed to update payment record',
       };
     }
+    
+    // Log successful update with new status
+    console.log(`Payment ${paystackData.reference} updated successfully with status: ${paymentData.status}, verified: ${paymentData.verified}`);
   } else {
     // New payment - insert it
+    console.log(`Inserting new payment with status: ${paymentData.status}, verified: ${paymentData.verified}`);
+    
     const { error } = await supabase
       .from('payments')
       .insert(paymentData);
@@ -222,6 +227,8 @@ async function storePaymentRecord(
         message: 'Failed to create payment record',
       };
     }
+    
+    console.log(`Payment ${paystackData.reference} inserted successfully`);
   }
 
   return {
@@ -472,6 +479,25 @@ serve(async (req) => {
     console.log('Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
     console.log('Store result:', storeResult);
+    
+    // Verify the payment was actually updated in the database
+    if (storeResult.success) {
+      const { data: verifiedPayment, error: verifyError } = await supabase
+        .from('payments')
+        .select('id, reference, status, verified')
+        .eq('reference', verificationResponse.data.reference)
+        .maybeSingle();
+      
+      if (!verifyError && verifiedPayment) {
+        console.log('Payment record in database after storage:', {
+          reference: verifiedPayment.reference,
+          status: verifiedPayment.status,
+          verified: verifiedPayment.verified
+        });
+      } else {
+        console.error('Failed to verify payment record was saved:', verifyError);
+      }
+    }
     
     if (!storeResult.success) {
       console.error('Failed to store payment record:', storeResult.message);
