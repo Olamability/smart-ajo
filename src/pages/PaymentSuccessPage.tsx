@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { verifyPayment } from '@/api/payments';
+import { getGroupMembers, getGroupById } from '@/api';
 import { toast } from 'sonner';
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
@@ -29,7 +30,7 @@ export default function PaymentSuccessPage() {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isRefetchingData, setIsRefetchingData] = useState(false);
   
   // Get payment reference and group ID from URL query params
   // Paystack may send either 'reference' or 'trxref' depending on callback configuration
@@ -61,19 +62,42 @@ export default function PaymentSuccessPage() {
         setVerificationMessage(result.message || 'Payment verified successfully!');
         setMemberPosition(result.position || null);
         toast.success('Payment verified! Your membership is now active.');
+        
+        // CRITICAL: After successful verification, explicitly refetch membership data
+        // to ensure the database has been updated and we have the latest state
+        if (groupId) {
+          if (import.meta.env.DEV) {
+            console.log('Refetching membership data after successful verification...');
+          }
+          setIsRefetchingData(true);
+          
+          try {
+            // Refetch group details and members to ensure database consistency
+            await Promise.all([
+              getGroupById(groupId),
+              getGroupMembers(groupId)
+            ]);
+            
+            if (import.meta.env.DEV) {
+              console.log('Membership data refetched successfully');
+            }
+          } catch (refetchError) {
+            if (import.meta.env.DEV) {
+              console.error('Error refetching membership data:', refetchError);
+            }
+            // Don't fail the verification if refetch fails - data will be loaded on navigation
+          } finally {
+            setIsRefetchingData(false);
+          }
+        }
       } else {
         // Check if the error is due to session expiration
         if (result.payment_status === 'unauthorized') {
-          setVerificationStatus('verifying'); // Keep showing verifying state during refresh
+          setVerificationStatus('failed');
           setVerificationMessage(
-            'Your payment was successful! Refreshing your session to complete verification...'
+            'Your session has expired. Please refresh this page to complete verification. Your payment was successful and will be verified once you reconnect.'
           );
-          toast.success('Payment completed! Reconnecting to verify...', { duration: 3000 });
-          
-          // Auto-refresh the page after 2 seconds to get a fresh session
-          refreshTimeoutRef.current = setTimeout(() => {
-            navigate(0);
-          }, 2000);
+          toast.error('Session expired. Please refresh the page to retry.');
         } else {
           setVerificationStatus('failed');
           setVerificationMessage(result.message || result.error || 'Payment verification failed');
@@ -88,7 +112,7 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  }, [reference, navigate]);
+  }, [reference, groupId]);
 
 
   useEffect(() => {
@@ -98,22 +122,12 @@ export default function PaymentSuccessPage() {
     }
   }, [reference, verificationStatus, handleVerifyPayment]);
 
-  // Cleanup timeouts on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
     if (groupId) {
-      // Navigate with fromPayment flag to trigger data reload in GroupDetailPage
-      // The backend verify-payment function completes synchronously and updates the database
-      // before returning success, so the membership state is already updated
-      navigate(`/groups/${groupId}`, { state: { fromPayment: true } });
+      // Add a reload query parameter to signal GroupDetailPage to refresh its data
+      // This ensures the UI reflects the updated membership status
+      navigate(`/groups/${groupId}?reload=true`);
     } else {
       navigate('/dashboard');
     }
@@ -143,7 +157,7 @@ export default function PaymentSuccessPage() {
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-4">
           {/* Status Icon */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || isRefetchingData) && (
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
           )}
           {verificationStatus === 'verified' && (
