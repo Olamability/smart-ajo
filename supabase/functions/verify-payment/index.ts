@@ -627,7 +627,10 @@ serve(async (req) => {
       console.log('Business logic executed:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
       
       // CRITICAL FIX: Explicitly ensure payment status is 'success' after business logic completes
-      // This is a final safety check to guarantee the payment record reflects the successful state
+      // This is a final safety check to guarantee the payment record reflects the successful state.
+      // NOTE: This is intentionally redundant with storePaymentRecord() to ensure reliability.
+      // The initial storage may fail silently in edge cases (RLS issues, race conditions, etc.),
+      // so this final update after business logic success acts as a safety net.
       if (businessLogicResult?.success) {
         console.log('Ensuring payment status is set to success in database...');
         const { error: finalUpdateError } = await supabase

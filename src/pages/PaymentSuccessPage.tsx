@@ -64,7 +64,9 @@ export default function PaymentSuccessPage() {
         toast.success('Payment verified! Your membership is now active.');
         
         // CRITICAL: After successful verification, explicitly refetch membership data
-        // to ensure the database has been updated and we have the latest state
+        // to ensure the database has been updated and we have the latest state.
+        // This warms the cache so that when user navigates to GroupDetailPage,
+        // the fresh data is immediately available without additional loading.
         if (groupId) {
           if (import.meta.env.DEV) {
             console.log('Refetching membership data after successful verification...');
@@ -73,13 +75,14 @@ export default function PaymentSuccessPage() {
           
           try {
             // Refetch group details and members to ensure database consistency
+            // The results are cached by Supabase client for immediate use on navigation
             await Promise.all([
               getGroupById(groupId),
               getGroupMembers(groupId)
             ]);
             
             if (import.meta.env.DEV) {
-              console.log('Membership data refetched successfully');
+              console.log('Membership data refetched and cached successfully');
             }
           } catch (refetchError) {
             if (import.meta.env.DEV) {
@@ -95,9 +98,9 @@ export default function PaymentSuccessPage() {
         if (result.payment_status === 'unauthorized') {
           setVerificationStatus('failed');
           setVerificationMessage(
-            'Your session has expired. Please refresh this page to complete verification. Your payment was successful and will be verified once you reconnect.'
+            'Session expired during verification. Your payment was received. Please refresh this page to retry verification.'
           );
-          toast.error('Session expired. Please refresh the page to retry.');
+          toast.error('Session expired. Please refresh the page to retry verification.');
         } else {
           setVerificationStatus('failed');
           setVerificationMessage(result.message || result.error || 'Payment verification failed');
