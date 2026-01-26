@@ -111,7 +111,10 @@ export default function GroupDetailPage() {
     const fromPayment = location.state?.fromPayment;
     // Timestamp is used in dependency array to force reload when value changes
     if (id && fromPayment) {
-      console.log('Reloading data after payment verification...');
+      // Only log in development
+      if (import.meta.env.DEV) {
+        console.log('Reloading data after payment verification...');
+      }
       // Reload all data when returning from payment
       loadGroupDetails();
       loadMembers();

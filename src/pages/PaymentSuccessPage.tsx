@@ -110,11 +110,13 @@ export default function PaymentSuccessPage() {
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
     if (groupId) {
-      // Add a small delay to ensure backend processing is complete
-      // Force a timestamp to ensure the state change is always detected
+      // Small delay to ensure backend processing completes and database updates propagate
+      // This is a reasonable tradeoff for UX - users see "verified" state before navigation
+      // Alternative would be polling, but that adds complexity and isn't needed since
+      // the verify-payment function completes synchronously before returning success
       setTimeout(() => {
         navigate(`/groups/${groupId}`, { state: { fromPayment: true, timestamp: Date.now() } });
-      }, 500); // 500ms delay to ensure database updates have propagated
+      }, 500);
     } else {
       navigate('/dashboard');
     }
