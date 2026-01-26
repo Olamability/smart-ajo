@@ -1,8 +1,17 @@
 /**
  * Paystack Webhook Handler
  * 
- * This Edge Function handles Paystack payment webhooks according to
- * "Paystack steup.md" specification.
+ * This Edge Function handles Paystack payment webhooks.
+ * 
+ * This acts as a BACKUP/SECONDARY payment processor. The PRIMARY processor
+ * is the verify-payment Edge Function which executes business logic immediately.
+ * 
+ * Webhooks ensure payments are processed even if:
+ * - User closes browser before verification completes
+ * - Network fails during frontend callback
+ * - verify-payment Edge Function fails temporarily
+ * 
+ * Business logic is idempotent - safe to execute multiple times.
  * 
  * Handles events:
  * - charge.success: Successful payments

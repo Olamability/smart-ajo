@@ -6,20 +6,14 @@
  * ✅ WHAT THIS FUNCTION DOES:
  * 1. Verifies payment with Paystack API using GET /transaction/verify/:reference
  * 2. Stores payment record in the 'payments' table
- * 3. Returns verification status to frontend
+ * 3. EXECUTES BUSINESS LOGIC immediately (adds members, creates contributions, etc.)
+ * 4. Returns verification status + position to frontend
  * 
- * ❌ WHAT THIS FUNCTION DOES NOT DO:
- * - Does NOT execute any business logic
- * - Does NOT update contributions table
- * - Does NOT update group_members table
- * - Does NOT create transactions
+ * This is the PRIMARY payment processing path. Business logic happens here synchronously
+ * so users are activated immediately after payment verification.
  * 
- * 🔄 WHERE BUSINESS LOGIC HAPPENS:
- * ALL business logic is executed exclusively in the paystack-webhook function.
- * The webhook is the single source of truth for payment processing because:
- * - Webhook is guaranteed to be called by Paystack even if user closes browser
- * - Webhook prevents race conditions and duplicate processing
- * - Webhook ensures payments are processed even if network fails during frontend callback
+ * The paystack-webhook function acts as a backup/secondary processor with the same logic
+ * for reliability (handles cases where user closes browser before verification completes).
  * 
  * Security:
  * - Uses Paystack SECRET key (never exposed to frontend)
@@ -34,9 +28,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-// Constants
-const FIRST_CYCLE_NUMBER = 1;
+import { processGroupCreationPayment, processGroupJoinPayment } from "../_shared/payment-processor.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -477,7 +469,6 @@ serve(async (req) => {
     console.log('Payment amount:', verificationResponse.data.amount);
 
     // Step 2: Store payment record (MANDATORY per spec)
-    // This is the ONLY action we take - business logic is handled by webhook
     console.log('Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
     console.log('Store result:', storeResult);
@@ -507,23 +498,116 @@ serve(async (req) => {
       );
     }
 
-    // ✅ IMPORTANT: Business logic is NOT executed here
-    // All business logic (updating contributions, group_members, transactions)
-    // is handled exclusively by the paystack-webhook function.
-    // This ensures webhook is the single source of truth for payment processing.
-    console.log('Payment verified and stored. Business logic will be processed by webhook.');
+    // Step 3: Execute business logic immediately after successful payment verification
+    // This is the PRIMARY payment processing path - users are activated here synchronously
+    let businessLogicResult: { success: boolean; message: string; position?: number } | null = null;
+    
+    if (verificationResponse.data.status === 'success') {
+      console.log('Payment successful - executing business logic...');
+      const paymentType = verificationResponse.data.metadata?.type;
+      
+      console.log('Payment type from metadata:', paymentType);
+      
+      try {
+        if (paymentType === 'group_creation') {
+          businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
+        } else if (paymentType === 'group_join') {
+          businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
+        } else if (paymentType === 'contribution' || paymentType === 'security_deposit') {
+          // These legacy payment types are for standalone contributions and deposits
+          // They don't have immediate processing requirements and are handled by webhook
+          // Modern flow uses 'group_creation' and 'group_join' types instead
+          console.log(`Legacy payment type '${paymentType}' will be processed by webhook`);
+          businessLogicResult = { 
+            success: true, 
+            message: 'Payment verified. Business logic will be processed by webhook.' 
+          };
+        } else {
+          console.warn('Unknown payment type:', paymentType);
+          console.warn('Full metadata:', verificationResponse.data.metadata);
+          // Don't fail verification for unknown types - webhook will handle it
+          businessLogicResult = { 
+            success: true, 
+            message: 'Payment verified. Type-specific processing will be handled by webhook.' 
+          };
+        }
+
+        if (businessLogicResult?.success === false) {
+          console.error('Business logic processing failed:', businessLogicResult.message);
+          // Payment is verified but business logic failed
+          // Return error but don't fail the verification itself
+          return new Response(
+            JSON.stringify({
+              success: false,
+              payment_status: 'verified_but_processing_failed',
+              verified: true,
+              amount: verificationResponse.data.amount,
+              message: `Payment verified but failed to process: ${businessLogicResult.message}`,
+              error: businessLogicResult.message,
+              data: {
+                reference: verificationResponse.data.reference,
+                amount: verificationResponse.data.amount,
+                currency: verificationResponse.data.currency,
+                channel: verificationResponse.data.channel,
+                paid_at: verificationResponse.data.paid_at,
+              },
+            }),
+            {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+      } catch (error) {
+        console.error('Business logic execution error:', error);
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        // Payment is verified but business logic had an exception
+        return new Response(
+          JSON.stringify({
+            success: false,
+            payment_status: 'verified_but_processing_error',
+            verified: true,
+            amount: verificationResponse.data.amount,
+            message: 'Payment verified but encountered an error during processing. Webhook will retry.',
+            error: error.message || 'Business logic execution failed',
+            data: {
+              reference: verificationResponse.data.reference,
+              amount: verificationResponse.data.amount,
+              currency: verificationResponse.data.currency,
+              channel: verificationResponse.data.channel,
+              paid_at: verificationResponse.data.paid_at,
+            },
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+      
+      console.log('Business logic executed:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
+    }
+
+    console.log('Payment verified and processed successfully');
     console.log('===== PAYMENT VERIFICATION END =====');
 
-    // Return verification result - webhook will handle business logic
+    // Determine overall success: payment verified AND business logic succeeded (or not required)
+    const paymentVerified = verificationResponse.data.status === 'success';
+    const businessLogicSucceeded = businessLogicResult === null || businessLogicResult.success === true;
+    const overallSuccess = paymentVerified && businessLogicSucceeded;
+
+    // Return verification result with business logic status
     return new Response(
       JSON.stringify({
-        success: verificationResponse.data.status === 'success',
+        success: overallSuccess,
         payment_status: verificationResponse.data.status,
-        verified: verificationResponse.data.status === 'success',
+        verified: paymentVerified,
         amount: verificationResponse.data.amount,
-        message: verificationResponse.data.status === 'success' 
-          ? 'Payment verified successfully. Processing in progress via webhook.' 
-          : 'Payment verification completed',
+        message: businessLogicResult?.message || (paymentVerified 
+          ? 'Payment verified and processed successfully' 
+          : 'Payment verification completed'),
+        position: businessLogicResult?.position, // Include position for group payments
         data: {
           reference: verificationResponse.data.reference,
           amount: verificationResponse.data.amount,
