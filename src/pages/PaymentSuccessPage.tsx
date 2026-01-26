@@ -110,13 +110,10 @@ export default function PaymentSuccessPage() {
   const handleNavigation = () => {
     // Navigate to group page if group ID is provided, otherwise to dashboard
     if (groupId) {
-      // Small delay to ensure backend processing completes and database updates propagate
-      // This is a reasonable tradeoff for UX - users see "verified" state before navigation
-      // Alternative would be polling, but that adds complexity and isn't needed since
-      // the verify-payment function completes synchronously before returning success
-      setTimeout(() => {
-        navigate(`/groups/${groupId}`, { state: { fromPayment: true, timestamp: Date.now() } });
-      }, 500);
+      // Navigate with fromPayment flag to trigger data reload in GroupDetailPage
+      // The backend verify-payment function completes synchronously and updates the database
+      // before returning success, so the membership state is already updated
+      navigate(`/groups/${groupId}`, { state: { fromPayment: true } });
     } else {
       navigate('/dashboard');
     }
