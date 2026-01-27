@@ -220,6 +220,88 @@ export async function initializeGroupJoinPayment(
   }
 }
 
+/**
+ * Initialize payment for a standalone contribution
+ * Creates a pending payment record in the database
+ * 
+ * @param contributionId - The contribution ID to pay
+ * @param groupId - The group ID
+ * @param amount - Total amount in Naira (will be converted to kobo)
+ * @returns Payment reference to use with Paystack
+ */
+export async function initializeContributionPayment(
+  contributionId: string,
+  groupId: string,
+  amount: number
+): Promise<PaymentInitResult> {
+  try {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    // Validate IDs format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(contributionId) || !uuidRegex.test(groupId)) {
+      return { success: false, error: 'Invalid ID format' };
+    }
+
+    // Verify contribution exists and belongs to user
+    const { data: contribution, error: contributionError } = await supabase
+      .from('contributions')
+      .select('id, user_id, status, amount')
+      .eq('id', contributionId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (contributionError || !contribution) {
+      return { success: false, error: 'Contribution not found or access denied' };
+    }
+
+    if (contribution.status === 'paid') {
+      return { success: false, error: 'Contribution already paid' };
+    }
+
+    // Generate unique reference
+    const uniqueId = crypto.randomUUID().substring(0, 8);
+    const reference = `CONTRIB_${contributionId.substring(0, 8)}_${uniqueId}`;
+
+    // Create pending payment record
+    const { error } = await supabase.from('payments').insert({
+      reference,
+      user_id: user.id,
+      amount: Math.round(amount * 100), // Convert to kobo
+      currency: 'NGN',
+      status: 'pending',
+      email: user.email,
+      channel: 'card',
+      verified: false,
+      metadata: {
+        type: 'contribution',
+        contribution_id: contributionId,
+        group_id: groupId,
+        user_id: user.id,
+      },
+    });
+
+    if (error) {
+      console.error('[Payment Init] Failed to create payment record:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('[Payment Init] Created pending contribution payment:', reference);
+    return { success: true, reference };
+  } catch (error) {
+    console.error('[Payment Init] Exception:', error);
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to initialize payment'),
+    };
+  }
+}
+
 // ============================================================================
 // PAYMENT VERIFICATION
 // ============================================================================
