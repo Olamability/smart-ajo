@@ -71,6 +71,8 @@ interface JoinRequest {
   user_id: string;
   user_name: string;
   user_email: string;
+  user_phone: string | null;
+  user_avatar_url: string | null;
   preferred_slot: number | null;
   message: string | null;
   created_at: string;
@@ -997,32 +999,60 @@ export default function GroupDetailPage() {
                 <CardContent>
                   <div className="space-y-3">
                     {joinRequests.map((request) => (
-                      <div key={request.id} className="flex items-center gap-3 p-3 border rounded-lg bg-yellow-50 border-yellow-200">
-                        <div className="w-10 h-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                          {request.preferred_slot ? (
-                            <span className="font-semibold text-yellow-700">#{request.preferred_slot}</span>
-                          ) : (
-                            <Clock className="w-5 h-5 text-yellow-600" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium">{request.user_name}</p>
-                          <p className="text-sm text-muted-foreground">{request.user_email}</p>
+                      <div key={request.id} className="flex items-start gap-3 p-4 border rounded-lg bg-yellow-50 border-yellow-200">
+                        {/* User Avatar */}
+                        <Avatar className="w-12 h-12 flex-shrink-0">
+                          <AvatarImage src={request.user_avatar_url || undefined} />
+                          <AvatarFallback className="bg-yellow-100 text-yellow-700">
+                            {request.user_name && request.user_name.length >= 2 
+                              ? request.user_name.substring(0, 2).toUpperCase()
+                              : request.user_name?.charAt(0).toUpperCase() || '?'}
+                          </AvatarFallback>
+                        </Avatar>
+                        
+                        <div className="flex-1 min-w-0">
+                          {/* User Info */}
+                          <div className="space-y-1">
+                            <p className="font-semibold text-gray-900">{request.user_name}</p>
+                            <div className="flex flex-col gap-1 text-sm text-gray-600">
+                              <span className="truncate">{request.user_email}</span>
+                              {request.user_phone && (
+                                <div className="flex items-center gap-1">
+                                  <Phone className="w-3 h-3" />
+                                  <span>{request.user_phone}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Requested Slot */}
                           {request.preferred_slot && (
-                            <p className="text-sm font-medium text-yellow-700 mt-1">
-                              Requested Position: #{request.preferred_slot}
-                            </p>
+                            <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-white border border-yellow-300 rounded-md">
+                              <span className="text-sm font-medium text-yellow-800">
+                                Requested Position:
+                              </span>
+                              <Badge className="bg-yellow-600">
+                                #{request.preferred_slot}
+                              </Badge>
+                            </div>
                           )}
+                          
+                          {/* Message */}
                           {request.message && (
-                            <p className="text-sm text-muted-foreground mt-1 italic">"{request.message}"</p>
+                            <div className="mt-2 p-2 bg-white border border-yellow-200 rounded text-sm text-gray-700 italic">
+                              "{request.message}"
+                            </div>
                           )}
                         </div>
-                        <div className="flex gap-2">
+                        
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-2 flex-shrink-0">
                           <Button
                             size="sm"
                             variant="default"
                             onClick={() => handleApproveRequest(request.id)}
                             disabled={processingRequestId === request.id}
+                            className="whitespace-nowrap"
                           >
                             {processingRequestId === request.id ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
@@ -1038,6 +1068,7 @@ export default function GroupDetailPage() {
                             variant="destructive"
                             onClick={() => handleRejectRequest(request.id)}
                             disabled={processingRequestId === request.id}
+                            className="whitespace-nowrap"
                           >
                             {processingRequestId === request.id ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
