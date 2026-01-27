@@ -319,7 +319,23 @@ WHERE user_id = 'USER_ID' AND group_id = 'GROUP_ID';
 **Solution:**
 - Payment processor has built-in idempotency
 - If duplicates exist, manually clean up:
+  
+  **⚠️ WARNING: DESTRUCTIVE OPERATION**
+  - **ALWAYS backup your database before running DELETE operations**
+  - Test the SELECT query first to verify what will be deleted
+  - Consider using a transaction that you can rollback if needed
+  
   ```sql
+  -- STEP 1: First, BACKUP your database or at least the affected tables
+  -- STEP 2: Preview what will be deleted (run SELECT first)
+  SELECT * FROM group_members 
+  WHERE id NOT IN (
+    SELECT MIN(id) 
+    FROM group_members 
+    GROUP BY user_id, group_id
+  );
+  
+  -- STEP 3: Only after verifying the preview, proceed with deletion
   -- Keep only the first record, delete duplicates
   DELETE FROM group_members 
   WHERE id NOT IN (

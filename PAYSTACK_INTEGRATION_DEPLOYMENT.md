@@ -408,7 +408,7 @@ Member activated via webhook ✅
 1. **Never expose secret keys:**
    - ✅ Frontend only uses `VITE_PAYSTACK_PUBLIC_KEY`
    - ✅ Backend uses `PAYSTACK_SECRET_KEY` from Supabase secrets
-   - ❌ Never commit secrets to Git
+   - ❌ **NEVER** commit secrets to Git
 
 2. **Verify on backend only:**
    - ✅ All payment verification happens on backend

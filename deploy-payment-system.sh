@@ -83,6 +83,9 @@ for func in "${FUNCTIONS[@]}"; do
         continue
     fi
     
+    # Note: Using --no-verify-jwt for development/testing
+    # For production, consider removing this flag and implementing proper JWT verification
+    # See: https://supabase.com/docs/guides/functions/auth
     if supabase functions deploy "$func" --no-verify-jwt; then
         echo -e "${GREEN}✓ $func deployed successfully${NC}"
         ((DEPLOYED++))
@@ -118,11 +121,18 @@ if echo "$SECRETS" | grep -q "PAYSTACK_SECRET_KEY"; then
     read -p "Do you want to update it? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Enter your Paystack Secret Key (sk_test_... or sk_live_...):"
+        echo ""
+        echo -e "${YELLOW}Security Note: Enter your secret key carefully.${NC}"
+        echo ""
+        echo "Enter your Paystack Secret Key (input will be hidden):"
         read -s PAYSTACK_KEY
         echo ""
-        supabase secrets set PAYSTACK_SECRET_KEY="$PAYSTACK_KEY"
-        echo -e "${GREEN}✓ PAYSTACK_SECRET_KEY updated${NC}"
+        if [ -n "$PAYSTACK_KEY" ] && [[ "$PAYSTACK_KEY" =~ ^sk_(test|live)_ ]]; then
+            supabase secrets set PAYSTACK_SECRET_KEY="$PAYSTACK_KEY"
+            echo -e "${GREEN}✓ PAYSTACK_SECRET_KEY updated${NC}"
+        else
+            echo -e "${RED}✗ Invalid or empty key. Update cancelled.${NC}"
+        fi
     fi
 else
     echo -e "${YELLOW}⚠ PAYSTACK_SECRET_KEY not configured${NC}"
@@ -133,15 +143,26 @@ else
     read -p "Do you want to set it now? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Enter your Paystack Secret Key (sk_test_... or sk_live_...):"
+        echo ""
+        echo -e "${YELLOW}Security Note: Enter your secret key carefully.${NC}"
+        echo -e "${YELLOW}For better security, consider setting this via environment variable or CI/CD secrets.${NC}"
+        echo ""
+        echo "Enter your Paystack Secret Key (input will be hidden):"
         read -s PAYSTACK_KEY
         echo ""
         if [ -z "$PAYSTACK_KEY" ]; then
             echo -e "${YELLOW}⚠ No key entered. You can set it later with:${NC}"
             echo -e "${BLUE}supabase secrets set PAYSTACK_SECRET_KEY=sk_test_your_key${NC}"
         else
-            supabase secrets set PAYSTACK_SECRET_KEY="$PAYSTACK_KEY"
-            echo -e "${GREEN}✓ PAYSTACK_SECRET_KEY configured${NC}"
+            # Validate key format (basic check)
+            if [[ "$PAYSTACK_KEY" =~ ^sk_(test|live)_ ]]; then
+                supabase secrets set PAYSTACK_SECRET_KEY="$PAYSTACK_KEY"
+                echo -e "${GREEN}✓ PAYSTACK_SECRET_KEY configured${NC}"
+            else
+                echo -e "${RED}✗ Invalid key format. Should start with 'sk_test_' or 'sk_live_'${NC}"
+                echo -e "${YELLOW}You can set it later with:${NC}"
+                echo -e "${BLUE}supabase secrets set PAYSTACK_SECRET_KEY=sk_test_your_key${NC}"
+            fi
         fi
     else
         echo -e "${YELLOW}⚠ Skipping secret configuration. Remember to set it later!${NC}"
