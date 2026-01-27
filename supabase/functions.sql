@@ -1876,6 +1876,214 @@ COMMENT ON FUNCTION transfer_wallet_funds IS
   'Transfers funds between two user wallets with transaction tracking';
 
 -- ============================================================================
+-- FUNCTION: log_audit_event
+-- ============================================================================
+-- Logs an audit event for compliance and security tracking
+-- Used to record important user actions and system events
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION log_audit_event(
+  p_user_id UUID,
+  p_action VARCHAR(100),
+  p_resource_type VARCHAR(50),
+  p_resource_id UUID,
+  p_details JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+DECLARE
+  v_audit_id UUID;
+BEGIN
+  INSERT INTO audit_logs (
+    user_id,
+    action,
+    resource_type,
+    resource_id,
+    details,
+    created_at
+  ) VALUES (
+    p_user_id,
+    p_action,
+    p_resource_type,
+    p_resource_id,
+    p_details,
+    NOW()
+  )
+  RETURNING id INTO v_audit_id;
+  
+  RETURN v_audit_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION log_audit_event IS 
+  'Logs an audit event for compliance and security tracking';
+
+-- ============================================================================
+-- FUNCTION: update_kyc_status
+-- ============================================================================
+-- Updates user's KYC status and logs the change
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION update_kyc_status(
+  p_user_id UUID,
+  p_kyc_status VARCHAR(50),
+  p_kyc_data JSONB DEFAULT '{}'::jsonb
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_old_status VARCHAR(50);
+BEGIN
+  -- Get old KYC status
+  SELECT kyc_status INTO v_old_status
+  FROM users
+  WHERE id = p_user_id;
+  
+  -- Update KYC status and data
+  UPDATE users
+  SET kyc_status = p_kyc_status,
+      kyc_data = COALESCE(kyc_data, '{}'::jsonb) || p_kyc_data,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the KYC status change
+  PERFORM log_audit_event(
+    p_user_id,
+    'kyc_status_changed',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'old_status', v_old_status,
+      'new_status', p_kyc_status,
+      'kyc_data', p_kyc_data
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION update_kyc_status IS 
+  'Updates user KYC status and logs the change for compliance';
+
+-- ============================================================================
+-- FUNCTION: check_user_kyc_status
+-- ============================================================================
+-- Checks if user meets KYC requirements for a specific action
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION check_user_kyc_status(
+  p_user_id UUID,
+  p_required_level VARCHAR(50) DEFAULT 'not_started'
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_kyc_status VARCHAR(50);
+  v_kyc_levels TEXT[] := ARRAY['not_started', 'pending', 'approved'];
+  v_required_level_index INTEGER;
+  v_user_level_index INTEGER;
+BEGIN
+  -- Get user's KYC status
+  SELECT kyc_status INTO v_kyc_status
+  FROM users
+  WHERE id = p_user_id;
+  
+  IF v_kyc_status IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Special case: if required level is 'approved', user must be approved
+  IF p_required_level = 'approved' THEN
+    RETURN v_kyc_status = 'approved';
+  END IF;
+  
+  -- For other levels, check if user meets minimum requirement
+  v_required_level_index := array_position(v_kyc_levels, p_required_level);
+  v_user_level_index := array_position(v_kyc_levels, v_kyc_status);
+  
+  RETURN v_user_level_index >= v_required_level_index;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION check_user_kyc_status IS 
+  'Checks if user meets KYC requirements for specific actions';
+
+-- ============================================================================
+-- FUNCTION: add_to_default_blacklist
+-- ============================================================================
+-- Adds a user to the default blacklist (suspends account)
+-- Used for users who default on payments
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION add_to_default_blacklist(
+  p_user_id UUID,
+  p_reason TEXT,
+  p_group_id UUID DEFAULT NULL
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  -- Suspend user account
+  UPDATE users
+  SET is_active = FALSE,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the action
+  PERFORM log_audit_event(
+    p_user_id,
+    'user_blacklisted',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'reason', p_reason,
+      'group_id', p_group_id,
+      'blacklisted_at', NOW()
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION add_to_default_blacklist IS 
+  'Adds user to default blacklist by suspending their account';
+
+-- ============================================================================
+-- FUNCTION: remove_from_default_blacklist
+-- ============================================================================
+-- Removes a user from the default blacklist (reactivates account)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION remove_from_default_blacklist(
+  p_user_id UUID,
+  p_reason TEXT
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  -- Reactivate user account
+  UPDATE users
+  SET is_active = TRUE,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the action
+  PERFORM log_audit_event(
+    p_user_id,
+    'user_removed_from_blacklist',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'reason', p_reason,
+      'removed_at', NOW()
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION remove_from_default_blacklist IS 
+  'Removes user from default blacklist by reactivating their account';
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --
