@@ -1,30 +1,39 @@
 /**
- * Paystack Payment Integration
+ * Paystack Frontend Integration - Clean Implementation
  * 
- * This module handles payment initialization using Paystack.
- * Only the public key is used on the frontend. Payment verification happens
- * on the backend via Supabase Edge Functions.
+ * This module handles ONLY payment initialization using Paystack's inline.js popup.
  * 
- * CRITICAL SECURITY RULES (per Paystack steup.md):
- * - Frontend MUST NOT mark payment as successful
- * - Frontend MUST NOT update wallet, subscription, or access rights
- * - Frontend only initializes payment and collects email
- * - All payment verification MUST happen via backend Edge Functions
- * - Backend authority rule: Frontend success ≠ payment success
+ * CRITICAL SECURITY RULES:
+ * ✅ Frontend ONLY initializes payment (opens Paystack modal)
+ * ✅ Frontend NEVER marks payment as successful
+ * ✅ Frontend NEVER updates database or business logic
+ * ✅ All verification and business logic happens on backend via Edge Functions
+ * ✅ Frontend only uses public key - secret key NEVER exposed
+ * 
+ * Flow:
+ * 1. Frontend calls initializePayment() with email, amount, reference
+ * 2. Paystack popup opens for user to complete payment
+ * 3. On success callback, frontend redirects to payment success page
+ * 4. Payment success page calls backend to verify payment
+ * 5. Backend verifies with Paystack, updates DB, executes business logic
  */
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface PaystackConfig {
   publicKey: string;
 }
 
-interface PaystackPaymentData {
+interface PaystackPopupData {
   email: string;
   amount: number; // Amount in kobo (smallest currency unit)
   reference: string;
   metadata?: Record<string, any>;
-  callback?: (response: PaystackResponse) => void;
+  callback_url?: string; // Redirect URL after payment
+  onSuccess?: (response: PaystackResponse) => void;
   onClose?: () => void;
-  callback_url?: string; // Optional URL to redirect to after payment
 }
 
 interface PaystackResponse {
@@ -47,6 +56,10 @@ declare global {
   }
 }
 
+// ============================================================================
+// PAYSTACK SERVICE
+// ============================================================================
+
 class PaystackService {
   private config: PaystackConfig;
   private scriptLoaded: boolean = false;
@@ -58,7 +71,8 @@ class PaystackService {
   }
 
   /**
-   * Load Paystack inline script
+   * Load Paystack inline.js script
+   * Script is loaded from Paystack CDN on demand
    */
   private async loadScript(): Promise<void> {
     if (this.scriptLoaded && window.PaystackPop) {
@@ -71,9 +85,11 @@ class PaystackService {
       script.async = true;
       script.onload = () => {
         this.scriptLoaded = true;
+        console.log('[Paystack] Script loaded successfully');
         resolve();
       };
       script.onerror = () => {
+        console.error('[Paystack] Failed to load script');
         reject(new Error('Failed to load Paystack script'));
       };
       document.body.appendChild(script);
@@ -81,53 +97,50 @@ class PaystackService {
   }
 
   /**
-   * Generate a unique payment reference
+   * Initialize and open Paystack payment popup
+   * 
+   * This ONLY opens the payment modal. It does NOT verify or process the payment.
+   * After payment, the callback_url is used to redirect to verification page.
+   * 
+   * @param data - Payment data including email, amount, reference
+   * @throws Error if public key not configured or script fails to load
    */
-  generateReference(prefix: string = 'PAY'): string {
-    const timestamp = Date.now();
-    const random = Math.floor(Math.random() * 1000000);
-    return `${prefix}_${timestamp}_${random}`;
-  }
-
-  /**
-   * Convert amount from Naira to Kobo
-   */
-  private toKobo(amount: number): number {
-    return Math.round(amount * 100);
-  }
-
-  /**
-   * Initialize a payment
-   */
-  async initializePayment(data: PaystackPaymentData): Promise<void> {
+  async initializePayment(data: PaystackPopupData): Promise<void> {
+    // Validate public key is configured
     if (!this.config.publicKey || this.config.publicKey === 'pk_test_your_paystack_public_key_here') {
       throw new Error(
-        'Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your .env file. ' +
-        'For local development, see ./ENVIRONMENT_SETUP.md. For Vercel deployment, see ./VERCEL_DEPLOYMENT.md.'
+        'Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your environment variables.'
       );
     }
 
-    // Ensure script is loaded
+    console.log('[Paystack] Initializing payment for reference:', data.reference);
+
+    // Load Paystack script if not already loaded
     await this.loadScript();
 
     if (!window.PaystackPop) {
-      throw new Error('Paystack script not loaded');
+      throw new Error('Paystack script not available');
     }
 
     // Setup payment handler
     const handler = window.PaystackPop.setup({
       key: this.config.publicKey,
       email: data.email,
-      amount: data.amount, // Amount should already be in kobo
+      amount: data.amount, // Amount should be in kobo
       ref: data.reference,
       metadata: data.metadata || {},
-      callback_url: data.callback_url, // Optional redirect URL after payment
+      callback_url: data.callback_url, // Redirect URL after payment
       callback: (response: PaystackResponse) => {
-        if (data.callback) {
-          data.callback(response);
+        console.log('[Paystack] Payment callback received:', response.reference);
+        // Frontend callback does NOT mean payment is verified!
+        // This just means Paystack returned a response.
+        // Verification MUST happen on backend.
+        if (data.onSuccess) {
+          data.onSuccess(response);
         }
       },
       onClose: () => {
+        console.log('[Paystack] Payment modal closed');
         if (data.onClose) {
           data.onClose();
         }
@@ -135,98 +148,32 @@ class PaystackService {
     });
 
     // Open payment modal
+    console.log('[Paystack] Opening payment modal');
     handler.openIframe();
   }
 
   /**
-   * Pay security deposit
+   * Convert amount from Naira to Kobo
+   * Paystack expects amounts in the smallest currency unit (kobo for NGN)
+   * 
+   * @param naira - Amount in Naira
+   * @returns Amount in Kobo
    */
-  async paySecurityDeposit(
-    email: string,
-    amount: number,
-    groupId: string,
-    userId: string,
-    callback?: (response: PaystackResponse) => void
-  ): Promise<void> {
-    const reference = this.generateReference('SEC_DEP');
-    
-    return this.initializePayment({
-      email,
-      amount: this.toKobo(amount),
-      reference,
-      metadata: {
-        // MANDATORY metadata per Paystack steup.md specification
-        app: 'smartajo',
-        user_id: userId,
-        purpose: 'security_deposit',
-        entity_id: groupId,
-        // Backward compatibility fields
-        type: 'security_deposit',
-        group_id: groupId,
-        custom_fields: [
-          {
-            display_name: 'Payment Type',
-            variable_name: 'payment_type',
-            value: 'Security Deposit',
-          },
-          {
-            display_name: 'Group ID',
-            variable_name: 'group_id',
-            value: groupId,
-          },
-        ],
-      },
-      callback,
-    });
+  toKobo(naira: number): number {
+    return Math.round(naira * 100);
   }
 
   /**
-   * Pay contribution
+   * Generate a unique payment reference
+   * Reference format: PREFIX_TIMESTAMP_RANDOM
+   * 
+   * @param prefix - Prefix for the reference (default: 'PAY')
+   * @returns Unique payment reference
    */
-  async payContribution(
-    email: string,
-    amount: number,
-    groupId: string,
-    userId: string,
-    cycleNumber: number,
-    callback?: (response: PaystackResponse) => void
-  ): Promise<void> {
-    const reference = this.generateReference('CONTRIB');
-    
-    return this.initializePayment({
-      email,
-      amount: this.toKobo(amount),
-      reference,
-      metadata: {
-        // MANDATORY metadata per Paystack steup.md specification
-        app: 'smartajo',
-        user_id: userId,
-        purpose: 'contribution',
-        entity_id: groupId,
-        // Backward compatibility fields
-        type: 'contribution',
-        group_id: groupId,
-        cycle_number: cycleNumber,
-        custom_fields: [
-          {
-            display_name: 'Payment Type',
-            variable_name: 'payment_type',
-            value: 'Contribution',
-          },
-          {
-            display_name: 'Group ID',
-            variable_name: 'group_id',
-            value: groupId,
-          },
-          {
-            display_name: 'Cycle',
-            variable_name: 'cycle',
-            value: cycleNumber.toString(),
-          },
-        ],
-      },
-      callback,
-    });
+  generateReference(prefix: string = 'PAY'): string {
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000000);
+    return `${prefix}_${timestamp}_${random}`;
   }
 }
 
@@ -234,4 +181,4 @@ class PaystackService {
 export const paystackService = new PaystackService();
 
 // Export types
-export type { PaystackResponse, PaystackPaymentData };
+export type { PaystackResponse, PaystackPopupData };

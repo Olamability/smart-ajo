@@ -1,23 +1,29 @@
 /**
  * Shared Payment Processing Logic
  * 
- * This module contains the business logic for processing different payment types.
- * It's shared between:
- * - verify-payment Edge Function (primary, synchronous)
- * - paystack-webhook Edge Function (backup, asynchronous)
+ * This module contains business logic for processing payments.
+ * It's shared between verify-payment (primary) and paystack-webhook (backup).
  * 
- * This ensures both paths execute the same business logic reliably.
+ * Both Edge Functions execute the same logic to ensure reliability:
+ * - verify-payment: Synchronous, user-initiated after payment
+ * - paystack-webhook: Asynchronous, Paystack-initiated (backup)
+ * 
+ * All functions are idempotent - safe to call multiple times.
  */
 
-// Type for Supabase client - using any for compatibility with Deno edge functions
-// In Deno edge runtime, we use service role client which doesn't have strict typing
+// Type for Supabase client (using any for Deno edge runtime compatibility)
 type SupabaseClient = any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // Constants
 const FIRST_CYCLE_NUMBER = 1;
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
 /**
- * Helper function to create payment transactions for group payments
+ * Create transaction records for group payment
+ * Separate transactions for security deposit and first contribution
  */
 export async function createPaymentTransactions(
   supabase: SupabaseClient,
@@ -37,8 +43,10 @@ export async function createPaymentTransactions(
         type: 'security_deposit',
         amount: securityDepositAmount,
         status: 'completed',
-        reference: reference + '_SD',
-        description: isCreator ? 'Security deposit for group creation' : 'Security deposit for joining group',
+        reference: `${reference}_SD`,
+        description: isCreator 
+          ? 'Security deposit for group creation' 
+          : 'Security deposit for joining group',
         completed_at: new Date().toISOString(),
       },
       {
@@ -47,22 +55,30 @@ export async function createPaymentTransactions(
         type: 'contribution',
         amount: contributionAmount,
         status: 'completed',
-        reference: reference + '_C1',
+        reference: `${reference}_C1`,
         description: 'First contribution payment',
         completed_at: new Date().toISOString(),
       },
     ]);
 
   if (error) {
-    console.error('Failed to create transactions:', error);
+    console.error('[Payment Processor] Failed to create transactions:', error);
     return false;
   }
+  
+  console.log('[Payment Processor] Transaction records created');
   return true;
 }
 
+// ============================================================================
+// BUSINESS LOGIC PROCESSORS
+// ============================================================================
+
 /**
  * Process group creation payment
- * Adds creator as member with selected slot and updates payment status
+ * Adds creator as member with selected slot and marks payment complete
+ * 
+ * Idempotent: Safe to call multiple times
  */
 export async function processGroupCreationPayment(
   supabase: SupabaseClient,
@@ -79,29 +95,26 @@ export async function processGroupCreationPayment(
 ): Promise<{ success: boolean; message: string; position?: number }> {
   const { reference, amount, metadata, status } = paymentData;
 
-  console.log('=== PROCESS GROUP CREATION PAYMENT START ===');
-  console.log('Reference:', reference);
-  console.log('Amount:', amount);
-  console.log('Status:', status);
-  console.log('Metadata:', JSON.stringify(metadata, null, 2));
+  console.log('[Payment Processor] Processing group creation payment');
+  console.log('[Payment Processor] Reference:', reference);
+  console.log('[Payment Processor] Status:', status);
 
   // Verify payment was successful
   if (status !== 'success') {
-    console.error('Payment status is not success:', status);
+    console.error('[Payment Processor] Payment not successful:', status);
     return { success: false, message: 'Payment not successful' };
   }
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
-  // Parse preferred_slot as integer - Paystack may send it as string
-  const preferredSlot = metadata?.preferred_slot ? parseInt(String(metadata.preferred_slot), 10) : 1;
+  const preferredSlot = metadata?.preferred_slot 
+    ? parseInt(String(metadata.preferred_slot), 10) 
+    : 1;
 
   if (!userId || !groupId) {
-    console.error('Missing required metadata:', { userId, groupId, preferredSlot });
-    return { success: false, message: 'Missing required metadata for group creation' };
+    console.error('[Payment Processor] Missing required metadata');
+    return { success: false, message: 'Missing required metadata' };
   }
-
-  console.log(`Processing group creation payment for user ${userId} in group ${groupId}, preferred slot: ${preferredSlot}`);
 
   // Get group details
   const { data: group, error: groupError } = await supabase
@@ -111,33 +124,27 @@ export async function processGroupCreationPayment(
     .single();
 
   if (groupError || !group) {
-    console.error('Group not found:', groupError);
+    console.error('[Payment Processor] Group not found:', groupError);
     return { success: false, message: 'Group not found' };
   }
 
-  console.log('Group found:', { 
-    contribution_amount: group.contribution_amount, 
-    security_deposit_amount: group.security_deposit_amount,
-    total_members: group.total_members,
-    created_by: group.created_by
-  });
-
   // Verify user is the creator
   if (group.created_by !== userId) {
-    console.error('User is not the creator of this group. Creator:', group.created_by, 'User:', userId);
+    console.error('[Payment Processor] User is not the group creator');
     return { success: false, message: 'Only the group creator can make this payment' };
   }
 
   // Verify payment amount
   const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
   if (amount < requiredAmount) {
+    console.error('[Payment Processor] Payment amount insufficient');
     return {
       success: false,
-      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
+      message: `Insufficient amount. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
     };
   }
 
-  // Check if user is already a member (idempotency)
+  // Check if already processed (idempotency)
   const { data: existingMember } = await supabase
     .from('group_members')
     .select('id, position, has_paid_security_deposit')
@@ -146,45 +153,43 @@ export async function processGroupCreationPayment(
     .maybeSingle();
 
   if (existingMember?.has_paid_security_deposit) {
-    console.log('Group creation payment already processed for reference:', reference);
-    return { 
-      success: true, 
-      message: 'Payment already processed (duplicate)', 
-      position: existingMember.position 
+    console.log('[Payment Processor] Already processed (duplicate)');
+    return {
+      success: true,
+      message: 'Payment already processed',
+      position: existingMember.position,
     };
   }
 
   let memberPosition = preferredSlot;
 
   if (!existingMember) {
-    // Creator is not yet a member - add them with their preferred slot
-    console.log(`Adding creator as member with preferred slot ${preferredSlot}`);
+    // Add creator as member
+    console.log('[Payment Processor] Adding creator as member with slot:', preferredSlot);
     
-    // Call add_member_to_group function to add creator
     const { data: addMemberResult, error: addMemberError } = await supabase
       .rpc('add_member_to_group', {
         p_group_id: groupId,
         p_user_id: userId,
         p_is_creator: true,
-        p_preferred_slot: preferredSlot
+        p_preferred_slot: preferredSlot,
       });
 
     if (addMemberError) {
-      console.error('Failed to add creator as member:', addMemberError);
+      console.error('[Payment Processor] Failed to add creator:', addMemberError);
       return { success: false, message: 'Failed to add creator to group' };
     }
 
-    // Check if the function returned success
     if (addMemberResult && addMemberResult.length > 0) {
       const result = addMemberResult[0];
       if (!result.success) {
-        console.error('add_member_to_group failed:', result.error_message);
-        return { success: false, message: result.error_message || 'Failed to add creator to group' };
+        console.error('[Payment Processor] add_member_to_group failed:', result.error_message);
+        return { success: false, message: result.error_message || 'Failed to add creator' };
       }
       memberPosition = result.position || preferredSlot;
     }
 
-    // Update the newly added member's payment status
+    // Update payment status
     const { error: memberError } = await supabase
       .from('group_members')
       .update({
@@ -197,13 +202,13 @@ export async function processGroupCreationPayment(
       .eq('user_id', userId);
 
     if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
+      console.error('[Payment Processor] Failed to update member:', memberError);
       return { success: false, message: 'Failed to update member payment status' };
     }
   } else {
     memberPosition = existingMember.position;
 
-    // Update existing member's payment status
+    // Update existing member
     const { error: memberError } = await supabase
       .from('group_members')
       .update({
@@ -216,12 +221,12 @@ export async function processGroupCreationPayment(
       .eq('user_id', userId);
 
     if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
+      console.error('[Payment Processor] Failed to update member:', memberError);
       return { success: false, message: 'Failed to update member payment status' };
     }
   }
 
-  // Update or create first contribution record
+  // Create first contribution record
   const { error: contribError } = await supabase
     .from('contributions')
     .upsert({
@@ -234,43 +239,38 @@ export async function processGroupCreationPayment(
       paid_date: new Date().toISOString(),
       transaction_ref: reference,
     }, {
-      onConflict: 'group_id,user_id,cycle_number'
+      onConflict: 'group_id,user_id,cycle_number',
     });
 
   if (contribError) {
-    console.error('Failed to update contribution:', contribError);
-    // Non-fatal for group creation - member is already set up with payment status
+    console.error('[Payment Processor] Failed to create contribution:', contribError);
+    // Non-fatal - member is already set up
   }
 
   // Create transaction records
-  const txSuccess = await createPaymentTransactions(
+  await createPaymentTransactions(
     supabase,
     groupId,
     userId,
     reference,
     group.security_deposit_amount,
     group.contribution_amount,
-    true // isCreator
+    true
   );
 
-  if (!txSuccess) {
-    console.error('Failed to create transaction records - payment processed but audit trail incomplete');
-  } else {
-    console.log('Transaction records created successfully');
-  }
-
-  console.log(`Group creation payment processed successfully. Creator assigned to position ${memberPosition}`);
-  console.log('=== PROCESS GROUP CREATION PAYMENT END (SUCCESS) ===');
-  return { 
-    success: true, 
-    message: 'Group creation payment processed successfully', 
-    position: memberPosition 
+  console.log('[Payment Processor] Group creation payment processed. Position:', memberPosition);
+  return {
+    success: true,
+    message: 'Group creation payment processed successfully',
+    position: memberPosition,
   };
 }
 
 /**
  * Process group join payment
- * Updates payment status for member who is already added to the group
+ * Activates member who already joined or adds new member with payment
+ * 
+ * Idempotent: Safe to call multiple times
  */
 export async function processGroupJoinPayment(
   supabase: SupabaseClient,
@@ -287,29 +287,26 @@ export async function processGroupJoinPayment(
 ): Promise<{ success: boolean; message: string; position?: number }> {
   const { reference, amount, metadata, status } = paymentData;
 
-  console.log('=== PROCESS GROUP JOIN PAYMENT START ===');
-  console.log('Reference:', reference);
-  console.log('Amount:', amount);
-  console.log('Status:', status);
-  console.log('Metadata:', JSON.stringify(metadata, null, 2));
+  console.log('[Payment Processor] Processing group join payment');
+  console.log('[Payment Processor] Reference:', reference);
+  console.log('[Payment Processor] Status:', status);
 
   // Verify payment was successful
   if (status !== 'success') {
-    console.error('Payment status is not success:', status);
+    console.error('[Payment Processor] Payment not successful:', status);
     return { success: false, message: 'Payment not successful' };
   }
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
-  // Parse preferred_slot as integer - Paystack may send it as string
-  const preferredSlot = metadata?.preferred_slot ? parseInt(String(metadata.preferred_slot), 10) : null;
+  const preferredSlot = metadata?.preferred_slot 
+    ? parseInt(String(metadata.preferred_slot), 10) 
+    : null;
 
   if (!userId || !groupId) {
-    console.error('Missing required metadata:', { userId, groupId });
-    return { success: false, message: 'Missing required metadata for group join' };
+    console.error('[Payment Processor] Missing required metadata');
+    return { success: false, message: 'Missing required metadata' };
   }
-
-  console.log(`Processing group join payment for user ${userId} in group ${groupId}, preferred slot: ${preferredSlot}`);
 
   // Get group details
   const { data: group, error: groupError } = await supabase
@@ -319,16 +316,17 @@ export async function processGroupJoinPayment(
     .single();
 
   if (groupError || !group) {
-    console.error('Group not found:', groupError);
+    console.error('[Payment Processor] Group not found:', groupError);
     return { success: false, message: 'Group not found' };
   }
 
   // Verify payment amount
   const requiredAmount = (group.contribution_amount + group.security_deposit_amount) * 100;
   if (amount < requiredAmount) {
+    console.error('[Payment Processor] Payment amount insufficient');
     return {
       success: false,
-      message: `Payment amount insufficient. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
+      message: `Insufficient amount. Expected: ₦${requiredAmount / 100}, Received: ₦${amount / 100}`,
     };
   }
 
@@ -343,19 +341,19 @@ export async function processGroupJoinPayment(
   let memberPosition: number;
 
   if (existingMember) {
-    // User is already a member - check if already paid (idempotency)
+    // Check if already paid (idempotency)
     if (existingMember.has_paid_security_deposit) {
-      console.log('Group join payment already processed for reference:', reference);
-      return { 
-        success: true, 
-        message: 'Payment already processed (duplicate)', 
-        position: existingMember.position 
+      console.log('[Payment Processor] Already processed (duplicate)');
+      return {
+        success: true,
+        message: 'Payment already processed',
+        position: existingMember.position,
       };
     }
 
     memberPosition = existingMember.position;
 
-    // Update existing member's payment status
+    // Update existing member
     const { error: memberError } = await supabase
       .from('group_members')
       .update({
@@ -368,12 +366,12 @@ export async function processGroupJoinPayment(
       .eq('user_id', userId);
 
     if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
+      console.error('[Payment Processor] Failed to update member:', memberError);
       return { success: false, message: 'Failed to update member payment status' };
     }
   } else {
-    // User is NOT a member yet - add them now
-    console.log(`Adding user as member with payment`);
+    // Add user as new member
+    console.log('[Payment Processor] Adding user as new member');
     
     // Get preferred slot from join request if not in metadata
     let slotToAssign = preferredSlot;
@@ -389,35 +387,33 @@ export async function processGroupJoinPayment(
       slotToAssign = joinRequest?.preferred_slot || null;
     }
     
-    // Call add_member_to_group function to add user with their preferred slot
     const { data: addMemberResult, error: addMemberError } = await supabase
       .rpc('add_member_to_group', {
         p_group_id: groupId,
         p_user_id: userId,
         p_is_creator: false,
-        p_preferred_slot: slotToAssign
+        p_preferred_slot: slotToAssign,
       });
 
     if (addMemberError) {
-      console.error('Failed to add user as member:', addMemberError);
+      console.error('[Payment Processor] Failed to add member:', addMemberError);
       return { success: false, message: 'Failed to add user to group' };
     }
 
-    // Check if the function returned success
     if (!addMemberResult || !Array.isArray(addMemberResult) || addMemberResult.length === 0) {
-      console.error('add_member_to_group returned no result');
-      return { success: false, message: 'Failed to add user to group - no result returned' };
+      console.error('[Payment Processor] add_member_to_group returned no result');
+      return { success: false, message: 'Failed to add user to group' };
     }
     
     const result = addMemberResult[0];
     if (!result.success) {
-      console.error('add_member_to_group failed:', result.error_message);
-      return { success: false, message: result.error_message || 'Failed to add user to group' };
+      console.error('[Payment Processor] add_member_to_group failed:', result.error_message);
+      return { success: false, message: result.error_message || 'Failed to add user' };
     }
 
     memberPosition = result.position;
 
-    // Update the newly added member's payment status
+    // Update payment status
     const { error: memberError } = await supabase
       .from('group_members')
       .update({
@@ -430,12 +426,12 @@ export async function processGroupJoinPayment(
       .eq('user_id', userId);
 
     if (memberError) {
-      console.error('Failed to update member payment status:', memberError);
+      console.error('[Payment Processor] Failed to update member:', memberError);
       return { success: false, message: 'Failed to update member payment status' };
     }
   }
 
-  // Update or create first contribution record
+  // Create first contribution record
   const currentTime = new Date().toISOString();
   const { error: contribError } = await supabase
     .from('contributions')
@@ -451,33 +447,27 @@ export async function processGroupJoinPayment(
       created_at: currentTime,
       updated_at: currentTime,
     }, {
-      onConflict: 'group_id,user_id,cycle_number'
+      onConflict: 'group_id,user_id,cycle_number',
     });
 
   if (contribError) {
-    console.error('Failed to update contribution:', contribError);
-    // Non-fatal for group join - member payment status is already updated
+    console.error('[Payment Processor] Failed to create contribution:', contribError);
+    // Non-fatal - member is already set up
   }
 
   // Create transaction records
-  const txSuccess = await createPaymentTransactions(
+  await createPaymentTransactions(
     supabase,
     groupId,
     userId,
     reference,
     group.security_deposit_amount,
     group.contribution_amount,
-    false // isCreator
+    false
   );
 
-  if (!txSuccess) {
-    console.error('Failed to create transaction records - payment processed but audit trail incomplete');
-  } else {
-    console.log('Transaction records created successfully');
-  }
-
-  // Update join request status to 'joined' if it exists
-  const { error: joinReqError } = await supabase
+  // Update join request status
+  await supabase
     .from('group_join_requests')
     .update({
       status: 'joined',
@@ -487,18 +477,10 @@ export async function processGroupJoinPayment(
     .eq('user_id', userId)
     .eq('status', 'approved');
 
-  if (joinReqError) {
-    console.error('Failed to update join request:', joinReqError);
-    // Non-fatal
-  } else {
-    console.log('Join request status updated to joined');
-  }
-
-  console.log(`Group join payment processed successfully. Member assigned to position ${memberPosition}`);
-  console.log('=== PROCESS GROUP JOIN PAYMENT END (SUCCESS) ===');
-  return { 
-    success: true, 
-    message: 'Group join payment processed successfully', 
-    position: memberPosition 
+  console.log('[Payment Processor] Group join payment processed. Position:', memberPosition);
+  return {
+    success: true,
+    message: 'Group join payment processed successfully',
+    position: memberPosition,
   };
 }

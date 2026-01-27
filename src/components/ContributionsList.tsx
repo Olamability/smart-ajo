@@ -7,7 +7,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getGroupContributions } from '@/api';
-import { paystackService, PaystackResponse } from '@/lib/paystack';
 import type { Contribution } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -65,29 +64,28 @@ export default function ContributionsList({
   const handlePayContribution = async (contribution: Contribution) => {
     if (!user) return;
 
+    // TODO: Implement standalone contribution payment flow
+    // This requires:
+    // 1. Create payment initialization function in payments.ts
+    // 2. Backend Edge Function to process contribution payments
+    // 3. Update this to use new payment flow
     setProcessingPayment(contribution.id);
+    toast.info('Standalone contribution payments coming soon. Use group join flow for now.');
+    setProcessingPayment(null);
+    
+    /*
     try {
-      await paystackService.payContribution(
-        user.email,
-        contribution.amount,
-        groupId,
-        user.id,
-        contribution.cycleNumber,
-        async (response: PaystackResponse) => {
-          if (response.status === 'success') {
-            toast.success('Contribution payment successful!');
-            loadContributions();
-          } else {
-            toast.error('Payment was not successful');
-          }
-          setProcessingPayment(null);
-        }
-      );
+      // New implementation will follow this pattern:
+      // 1. Initialize payment record in database
+      // 2. Open Paystack modal with reference
+      // 3. Redirect to payment success page for verification
+      // 4. Backend verifies and processes
     } catch (error) {
       console.error('Payment error:', error);
       toast.error('Failed to initialize payment');
       setProcessingPayment(null);
     }
+    */
   };
 
   const getStatusColor = (status: string) => {

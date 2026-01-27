@@ -275,7 +275,7 @@ export default function GroupDetailPage() {
       // This ensures proper session handling and backend verification
       await paystackService.initializePayment({
         email: user.email!,
-        amount: totalAmount * 100, // Convert to kobo
+        amount: paystackService.toKobo(totalAmount), // Convert to kobo
         reference: initResult.reference,
         metadata: {
           type: isCreator ? 'group_creation' : 'group_join',
@@ -284,7 +284,7 @@ export default function GroupDetailPage() {
           preferred_slot: preferredSlot,
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
-        callback: (response: PaystackResponse) => {
+        onSuccess: (response: PaystackResponse) => {
           // Payment modal closed - Paystack will redirect to callback_url
           // The PaymentSuccessPage will handle verification with proper session management
           if (response.status === 'success') {
