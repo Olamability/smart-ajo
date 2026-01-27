@@ -8,6 +8,31 @@
 -- ============================================================================
 
 -- ============================================================================
+-- TRIGGER: Auto-create wallet for new users
+-- ============================================================================
+-- Automatically creates a wallet when a new user is created
+-- Ensures every user has a wallet from the start
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION create_user_wallet()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Create wallet for the new user with zero balance
+  INSERT INTO wallets (user_id, balance, locked_balance)
+  VALUES (NEW.id, 0, 0);
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to auto-create wallet on user creation
+DROP TRIGGER IF EXISTS trigger_create_user_wallet ON users;
+CREATE TRIGGER trigger_create_user_wallet
+  AFTER INSERT ON users
+  FOR EACH ROW
+  EXECUTE FUNCTION create_user_wallet();
+
+-- ============================================================================
 -- TRIGGER: Auto-create notifications on contribution payment
 -- ============================================================================
 -- Creates notification when a contribution is paid
@@ -708,5 +733,176 @@ COMMENT ON TRIGGER trigger_update_group_member_count ON group_members IS
 
 COMMENT ON FUNCTION auto_add_creator_as_member IS 
   'DISABLED TRIGGER: Creator is now added to group after payment with selected slot. Function retained for manual use only.';
+
+-- ============================================================================
+-- TRIGGER: Check and activate group on security deposit payment
+-- ============================================================================
+-- When a member pays their security deposit, check if group is ready to activate
+-- If all positions filled and all deposits paid, activate group and generate cycles
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION trigger_check_group_activation()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only proceed if security deposit status changed to TRUE
+  IF NEW.has_paid_security_deposit = TRUE AND 
+     (OLD.has_paid_security_deposit IS NULL OR OLD.has_paid_security_deposit = FALSE) THEN
+    -- Check if group should be activated
+    PERFORM check_and_activate_group(NEW.group_id);
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_group_activation ON group_members;
+CREATE TRIGGER trigger_group_activation
+  AFTER UPDATE ON group_members
+  FOR EACH ROW
+  EXECUTE FUNCTION trigger_check_group_activation();
+
+COMMENT ON TRIGGER trigger_group_activation ON group_members IS 
+  'Checks if group should be activated when member pays security deposit';
+
+-- ============================================================================
+-- TRIGGER: Audit log for group creation
+-- ============================================================================
+-- Logs when a new group is created
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION audit_group_creation()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM log_audit_event(
+    NEW.created_by,
+    'group_created',
+    'group',
+    NEW.id,
+    jsonb_build_object(
+      'group_name', NEW.name,
+      'contribution_amount', NEW.contribution_amount,
+      'total_members', NEW.total_members,
+      'frequency', NEW.frequency
+    )
+  );
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_audit_group_creation ON groups;
+CREATE TRIGGER trigger_audit_group_creation
+  AFTER INSERT ON groups
+  FOR EACH ROW
+  EXECUTE FUNCTION audit_group_creation();
+
+-- ============================================================================
+-- TRIGGER: Audit log for member joining group
+-- ============================================================================
+-- Logs when a user joins a group
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION audit_member_join()
+RETURNS TRIGGER AS $$
+BEGIN
+  PERFORM log_audit_event(
+    NEW.user_id,
+    'member_joined_group',
+    'group_member',
+    NEW.id,
+    jsonb_build_object(
+      'group_id', NEW.group_id,
+      'position', NEW.position,
+      'is_creator', NEW.is_creator
+    )
+  );
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_audit_member_join ON group_members;
+CREATE TRIGGER trigger_audit_member_join
+  AFTER INSERT ON group_members
+  FOR EACH ROW
+  EXECUTE FUNCTION audit_member_join();
+
+-- ============================================================================
+-- TRIGGER: Audit log for payments
+-- ============================================================================
+-- Logs when a payment is completed
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION audit_payment_completed()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only log when payment status changes to completed/paid
+  IF NEW.status IN ('completed', 'paid') AND 
+     (OLD.status IS NULL OR OLD.status NOT IN ('completed', 'paid')) THEN
+    PERFORM log_audit_event(
+      NEW.user_id,
+      'payment_completed',
+      'payment',
+      NEW.id,
+      jsonb_build_object(
+        'amount', NEW.amount,
+        'payment_type', NEW.payment_type,
+        'group_id', NEW.group_id,
+        'reference', NEW.reference
+      )
+    );
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_audit_payment_completed ON payments;
+CREATE TRIGGER trigger_audit_payment_completed
+  AFTER INSERT OR UPDATE ON payments
+  FOR EACH ROW
+  EXECUTE FUNCTION audit_payment_completed();
+
+-- ============================================================================
+-- TRIGGER: Audit log for wallet transactions
+-- ============================================================================
+-- Logs significant wallet balance changes
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION audit_wallet_change()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_balance_change DECIMAL(15, 2);
+BEGIN
+  -- Calculate balance change
+  v_balance_change := NEW.balance - COALESCE(OLD.balance, 0);
+  
+  -- Only log significant changes (> 0)
+  IF ABS(v_balance_change) > 0 THEN
+    PERFORM log_audit_event(
+      NEW.user_id,
+      CASE 
+        WHEN v_balance_change > 0 THEN 'wallet_credited'
+        ELSE 'wallet_debited'
+      END,
+      'wallet',
+      NEW.id,
+      jsonb_build_object(
+        'amount', ABS(v_balance_change),
+        'old_balance', COALESCE(OLD.balance, 0),
+        'new_balance', NEW.balance
+      )
+    );
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_audit_wallet_change ON wallets;
+CREATE TRIGGER trigger_audit_wallet_change
+  AFTER UPDATE ON wallets
+  FOR EACH ROW
+  EXECUTE FUNCTION audit_wallet_change();
 
 -- ============================================================================

@@ -1521,6 +1521,587 @@ COMMENT ON FUNCTION mark_payout_failed IS
   'Marks a payout as failed with error details';
 
 -- ============================================================================
+-- FUNCTION: check_and_activate_group
+-- ============================================================================
+-- Checks if a group should be activated and generates contribution cycles
+-- Called when a member pays their security deposit
+-- Activates group if all positions are filled and all security deposits paid
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION check_and_activate_group(p_group_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_total_members INTEGER;
+  v_current_members INTEGER;
+  v_all_deposits_paid BOOLEAN;
+  v_group_status VARCHAR(20);
+  v_start_date TIMESTAMPTZ;
+  v_frequency VARCHAR(20);
+BEGIN
+  -- Get group details
+  SELECT total_members, current_members, status, start_date, frequency
+  INTO v_total_members, v_current_members, v_group_status, v_start_date, v_frequency
+  FROM groups
+  WHERE id = p_group_id;
+  
+  -- Only activate groups in 'forming' status
+  IF v_group_status != 'forming' THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Check if all positions are filled
+  IF v_current_members < v_total_members THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Check if all members have paid their security deposits
+  SELECT COUNT(*) = v_total_members INTO v_all_deposits_paid
+  FROM group_members
+  WHERE group_id = p_group_id
+    AND has_paid_security_deposit = TRUE
+    AND status = 'active';
+  
+  -- If all conditions met, activate the group
+  IF v_all_deposits_paid THEN
+    -- Update group status to active
+    UPDATE groups
+    SET status = 'active',
+        start_date = COALESCE(v_start_date, NOW()),
+        updated_at = NOW()
+    WHERE id = p_group_id;
+    
+    -- Generate contribution cycles
+    PERFORM generate_contribution_cycles(p_group_id);
+    
+    RETURN TRUE;
+  END IF;
+  
+  RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION check_and_activate_group IS 
+  'Checks conditions and activates group if ready, generating contribution cycles';
+
+-- ============================================================================
+-- FUNCTION: generate_contribution_cycles
+-- ============================================================================
+-- Generates all contribution cycles for a group when it becomes active
+-- Creates one cycle per member based on their position order
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION generate_contribution_cycles(p_group_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+  v_member RECORD;
+  v_cycle_number INTEGER;
+  v_start_date TIMESTAMPTZ;
+  v_due_date TIMESTAMPTZ;
+  v_frequency VARCHAR(20);
+  v_contribution_amount DECIMAL(15, 2);
+  v_service_fee_percentage INTEGER;
+  v_total_members INTEGER;
+  v_expected_amount DECIMAL(15, 2);
+  v_cycles_created INTEGER := 0;
+BEGIN
+  -- Get group details
+  SELECT start_date, frequency, contribution_amount, service_fee_percentage, total_members
+  INTO v_start_date, v_frequency, v_contribution_amount, v_service_fee_percentage, v_total_members
+  FROM groups
+  WHERE id = p_group_id;
+  
+  -- Calculate expected amount per cycle (contribution from all members)
+  v_expected_amount := v_contribution_amount * v_total_members;
+  
+  -- Generate cycles for each position
+  FOR v_member IN 
+    SELECT user_id, position
+    FROM group_members
+    WHERE group_id = p_group_id
+      AND status = 'active'
+    ORDER BY position ASC
+  LOOP
+    v_cycle_number := v_member.position;
+    
+    -- Calculate cycle dates based on frequency
+    CASE v_frequency
+      WHEN 'daily' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 day');
+      WHEN 'weekly' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 week');
+      WHEN 'monthly' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 month');
+      ELSE
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 month');
+    END CASE;
+    
+    -- Insert contribution cycle
+    INSERT INTO contribution_cycles (
+      group_id,
+      cycle_number,
+      collector_user_id,
+      collector_position,
+      start_date,
+      due_date,
+      status,
+      expected_amount,
+      collected_amount,
+      payout_amount,
+      service_fee_collected
+    ) VALUES (
+      p_group_id,
+      v_cycle_number,
+      v_member.user_id,
+      v_member.position,
+      CASE 
+        WHEN v_cycle_number = 1 THEN v_start_date
+        ELSE v_due_date - (
+          CASE v_frequency
+            WHEN 'daily' THEN INTERVAL '1 day'
+            WHEN 'weekly' THEN INTERVAL '1 week'
+            WHEN 'monthly' THEN INTERVAL '1 month'
+            ELSE INTERVAL '1 month'
+          END
+        )
+      END,
+      v_due_date,
+      CASE WHEN v_cycle_number = 1 THEN 'active' ELSE 'pending' END,
+      v_expected_amount,
+      0,
+      0,
+      0
+    );
+    
+    v_cycles_created := v_cycles_created + 1;
+    
+    -- Create contribution records for all members for this cycle
+    INSERT INTO contributions (
+      group_id,
+      user_id,
+      cycle_number,
+      amount,
+      service_fee,
+      due_date,
+      status
+    )
+    SELECT
+      p_group_id,
+      gm.user_id,
+      v_cycle_number,
+      v_contribution_amount,
+      ROUND(v_contribution_amount * v_service_fee_percentage / 100, 2),
+      v_due_date,
+      'pending'
+    FROM group_members gm
+    WHERE gm.group_id = p_group_id
+      AND gm.status = 'active';
+  END LOOP;
+  
+  RETURN v_cycles_created;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION generate_contribution_cycles IS 
+  'Generates all contribution cycles for an active group based on member positions';
+
+-- ============================================================================
+-- FUNCTION: process_payout_to_wallet
+-- ============================================================================
+-- Processes a payout by transferring funds to the recipient's wallet
+-- Creates transaction record for audit trail
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION process_payout_to_wallet(
+  p_payout_id UUID
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_payout RECORD;
+  v_recipient_wallet_id UUID;
+  v_system_wallet_id UUID;
+  v_transaction_ref VARCHAR(255);
+BEGIN
+  -- Get payout details
+  SELECT * INTO v_payout
+  FROM payouts
+  WHERE id = p_payout_id
+    AND status = 'pending';
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payout not found or already processed';
+  END IF;
+  
+  -- Get recipient's wallet
+  SELECT id INTO v_recipient_wallet_id
+  FROM wallets
+  WHERE user_id = v_payout.recipient_id;
+  
+  IF v_recipient_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Recipient wallet not found';
+  END IF;
+  
+  -- Generate transaction reference
+  v_transaction_ref := 'PAYOUT-' || v_payout.related_group_id || '-C' || v_payout.cycle_number;
+  
+  -- Credit recipient's wallet
+  UPDATE wallets
+  SET balance = balance + v_payout.amount,
+      updated_at = NOW()
+  WHERE id = v_recipient_wallet_id;
+  
+  -- Create transaction record
+  INSERT INTO transactions (
+    user_id,
+    group_id,
+    from_wallet_id,
+    to_wallet_id,
+    amount,
+    type,
+    status,
+    payment_method,
+    reference,
+    description,
+    metadata
+  ) VALUES (
+    v_payout.recipient_id,
+    v_payout.related_group_id,
+    NULL, -- System credit
+    v_recipient_wallet_id,
+    v_payout.amount,
+    'payout',
+    'completed',
+    'wallet_transfer',
+    v_transaction_ref,
+    'Cycle payout to wallet',
+    jsonb_build_object(
+      'payout_id', v_payout.id,
+      'group_id', v_payout.related_group_id,
+      'cycle_number', v_payout.cycle_number
+    )
+  );
+  
+  -- Update payout status
+  UPDATE payouts
+  SET status = 'completed',
+      payout_date = NOW(),
+      payment_reference = v_transaction_ref,
+      updated_at = NOW()
+  WHERE id = p_payout_id;
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION process_payout_to_wallet IS 
+  'Processes a payout by crediting recipient wallet and creating transaction record';
+
+-- ============================================================================
+-- FUNCTION: transfer_wallet_funds
+-- ============================================================================
+-- Transfers funds between two wallets
+-- Used for internal transfers, penalties, etc.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION transfer_wallet_funds(
+  p_from_user_id UUID,
+  p_to_user_id UUID,
+  p_amount DECIMAL(15, 2),
+  p_transaction_type VARCHAR(50),
+  p_reference VARCHAR(255),
+  p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+DECLARE
+  v_from_wallet_id UUID;
+  v_to_wallet_id UUID;
+  v_transaction_id UUID;
+BEGIN
+  -- Validate amount
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'Transfer amount must be positive';
+  END IF;
+  
+  -- Get sender's wallet
+  SELECT id INTO v_from_wallet_id
+  FROM wallets
+  WHERE user_id = p_from_user_id;
+  
+  IF v_from_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Sender wallet not found';
+  END IF;
+  
+  -- Get recipient's wallet
+  SELECT id INTO v_to_wallet_id
+  FROM wallets
+  WHERE user_id = p_to_user_id;
+  
+  IF v_to_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Recipient wallet not found';
+  END IF;
+  
+  -- Check sufficient balance
+  IF NOT EXISTS (
+    SELECT 1 FROM wallets
+    WHERE id = v_from_wallet_id
+      AND balance >= p_amount
+  ) THEN
+    RAISE EXCEPTION 'Insufficient balance';
+  END IF;
+  
+  -- Debit sender's wallet
+  UPDATE wallets
+  SET balance = balance - p_amount,
+      updated_at = NOW()
+  WHERE id = v_from_wallet_id;
+  
+  -- Credit recipient's wallet
+  UPDATE wallets
+  SET balance = balance + p_amount,
+      updated_at = NOW()
+  WHERE id = v_to_wallet_id;
+  
+  -- Create transaction record
+  INSERT INTO transactions (
+    user_id,
+    from_wallet_id,
+    to_wallet_id,
+    amount,
+    type,
+    status,
+    payment_method,
+    reference,
+    description,
+    metadata
+  ) VALUES (
+    p_from_user_id,
+    v_from_wallet_id,
+    v_to_wallet_id,
+    p_amount,
+    p_transaction_type,
+    'completed',
+    'wallet_transfer',
+    p_reference,
+    'Internal wallet transfer',
+    p_metadata
+  )
+  RETURNING id INTO v_transaction_id;
+  
+  RETURN v_transaction_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION transfer_wallet_funds IS 
+  'Transfers funds between two user wallets with transaction tracking';
+
+-- ============================================================================
+-- FUNCTION: log_audit_event
+-- ============================================================================
+-- Logs an audit event for compliance and security tracking
+-- Used to record important user actions and system events
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION log_audit_event(
+  p_user_id UUID,
+  p_action VARCHAR(100),
+  p_resource_type VARCHAR(50),
+  p_resource_id UUID,
+  p_details JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+DECLARE
+  v_audit_id UUID;
+BEGIN
+  INSERT INTO audit_logs (
+    user_id,
+    action,
+    resource_type,
+    resource_id,
+    details,
+    created_at
+  ) VALUES (
+    p_user_id,
+    p_action,
+    p_resource_type,
+    p_resource_id,
+    p_details,
+    NOW()
+  )
+  RETURNING id INTO v_audit_id;
+  
+  RETURN v_audit_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION log_audit_event IS 
+  'Logs an audit event for compliance and security tracking';
+
+-- ============================================================================
+-- FUNCTION: update_kyc_status
+-- ============================================================================
+-- Updates user's KYC status and logs the change
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION update_kyc_status(
+  p_user_id UUID,
+  p_kyc_status VARCHAR(50),
+  p_kyc_data JSONB DEFAULT '{}'::jsonb
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_old_status VARCHAR(50);
+BEGIN
+  -- Get old KYC status
+  SELECT kyc_status INTO v_old_status
+  FROM users
+  WHERE id = p_user_id;
+  
+  -- Update KYC status and data
+  UPDATE users
+  SET kyc_status = p_kyc_status,
+      kyc_data = COALESCE(kyc_data, '{}'::jsonb) || p_kyc_data,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the KYC status change
+  PERFORM log_audit_event(
+    p_user_id,
+    'kyc_status_changed',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'old_status', v_old_status,
+      'new_status', p_kyc_status,
+      'kyc_data', p_kyc_data
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION update_kyc_status IS 
+  'Updates user KYC status and logs the change for compliance';
+
+-- ============================================================================
+-- FUNCTION: check_user_kyc_status
+-- ============================================================================
+-- Checks if user meets KYC requirements for a specific action
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION check_user_kyc_status(
+  p_user_id UUID,
+  p_required_level VARCHAR(50) DEFAULT 'not_started'
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_kyc_status VARCHAR(50);
+  v_kyc_levels TEXT[] := ARRAY['not_started', 'pending', 'approved'];
+  v_required_level_index INTEGER;
+  v_user_level_index INTEGER;
+BEGIN
+  -- Get user's KYC status
+  SELECT kyc_status INTO v_kyc_status
+  FROM users
+  WHERE id = p_user_id;
+  
+  IF v_kyc_status IS NULL THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Special case: if required level is 'approved', user must be approved
+  IF p_required_level = 'approved' THEN
+    RETURN v_kyc_status = 'approved';
+  END IF;
+  
+  -- For other levels, check if user meets minimum requirement
+  v_required_level_index := array_position(v_kyc_levels, p_required_level);
+  v_user_level_index := array_position(v_kyc_levels, v_kyc_status);
+  
+  RETURN v_user_level_index >= v_required_level_index;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION check_user_kyc_status IS 
+  'Checks if user meets KYC requirements for specific actions';
+
+-- ============================================================================
+-- FUNCTION: add_to_default_blacklist
+-- ============================================================================
+-- Adds a user to the default blacklist (suspends account)
+-- Used for users who default on payments
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION add_to_default_blacklist(
+  p_user_id UUID,
+  p_reason TEXT,
+  p_group_id UUID DEFAULT NULL
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  -- Suspend user account
+  UPDATE users
+  SET is_active = FALSE,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the action
+  PERFORM log_audit_event(
+    p_user_id,
+    'user_blacklisted',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'reason', p_reason,
+      'group_id', p_group_id,
+      'blacklisted_at', NOW()
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION add_to_default_blacklist IS 
+  'Adds user to default blacklist by suspending their account';
+
+-- ============================================================================
+-- FUNCTION: remove_from_default_blacklist
+-- ============================================================================
+-- Removes a user from the default blacklist (reactivates account)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION remove_from_default_blacklist(
+  p_user_id UUID,
+  p_reason TEXT
+)
+RETURNS BOOLEAN AS $$
+BEGIN
+  -- Reactivate user account
+  UPDATE users
+  SET is_active = TRUE,
+      updated_at = NOW()
+  WHERE id = p_user_id;
+  
+  -- Log the action
+  PERFORM log_audit_event(
+    p_user_id,
+    'user_removed_from_blacklist',
+    'user',
+    p_user_id,
+    jsonb_build_object(
+      'reason', p_reason,
+      'removed_at', NOW()
+    )
+  );
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION remove_from_default_blacklist IS 
+  'Removes user from default blacklist by reactivating their account';
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --

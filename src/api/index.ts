@@ -15,3 +15,4 @@ export * from './notifications';
 export * from './stats';
 export * from './profile';
 export * from './payments';
+export * from './wallets';
