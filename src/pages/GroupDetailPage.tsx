@@ -1004,7 +1004,9 @@ export default function GroupDetailPage() {
                         <Avatar className="w-12 h-12 flex-shrink-0">
                           <AvatarImage src={request.user_avatar_url || undefined} />
                           <AvatarFallback className="bg-yellow-100 text-yellow-700">
-                            {request.user_name.substring(0, 2).toUpperCase()}
+                            {request.user_name && request.user_name.length >= 2 
+                              ? request.user_name.substring(0, 2).toUpperCase()
+                              : request.user_name?.charAt(0).toUpperCase() || '?'}
                           </AvatarFallback>
                         </Avatar>
                         

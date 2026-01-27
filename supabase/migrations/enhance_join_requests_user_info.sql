@@ -2,8 +2,8 @@
 -- MIGRATION: Enhance Join Requests User Information
 -- ============================================================================
 -- This migration enhances the get_pending_join_requests function to include
--- additional user information (phone, avatar, bank details) so admins can
--- make better informed decisions when reviewing join requests.
+-- additional user information (phone and avatar) so admins can make better
+-- informed decisions when reviewing join requests.
 -- ============================================================================
 
 -- ============================================================================
