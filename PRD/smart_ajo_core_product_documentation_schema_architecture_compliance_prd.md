@@ -1,258 +1,512 @@
-User Roles
-1. Platform
+# SMART AJO (Working Name)
 
-Acts as neutral organizer
+A secure, automated digital contribution (ajo / esusu) platform using Paystack, deposits, and penalties to eliminate defaults and trust issues.
 
-Holds all funds in escrow
+---
 
-Enforces rules automatically
+## B. DATABASE SCHEMA & ERD
 
-Executes payouts via Paystack
+### 1. USERS
+Stores all registered users.
 
-2. Group Creator (Admin)
+- id (UUID, PK)
+- full_name
+- email
+- phone_number
+- password_hash
+- is_verified (boolean)
+- kyc_level (none | basic | advanced)
+- status (active | suspended | banned)
+- created_at
 
-Creates ajo groups
+---
 
-Sets group rules
+### 2. WALLETS
+Each user has an internal wallet.
 
-Reviews and approves applicants
+- id (UUID, PK)
+- user_id (FK → users.id)
+- balance
+- locked_balance (for deposits)
+- created_at
 
-Cannot tamper with funds or payout order once locked
+---
 
-3. Group Member
+### 3. GROUPS
+Represents an ajo group.
 
-Applies to join groups
+- id (UUID, PK)
+- name
+- creator_id (FK → users.id)
+- contribution_amount (e.g. 10000)
+- service_fee_percentage (default: 10%)
+- frequency (weekly | monthly)
+- total_members
+- start_date
+- status (pending | active | completed | cancelled)
+- created_at
 
-Pays security deposit and contributions
+---
 
-Receives payout based on assigned slot
+### 4. GROUP_MEMBERS
+Tracks users inside a group.
 
-Detailed User Flow (MVP)
-1. User Registration & Onboarding
-Required
+- id (UUID, PK)
+- group_id (FK → groups.id)
+- user_id (FK → users.id)
+- rotation_position
+- has_collected (boolean)
+- status (active | defaulted | removed)
+- joined_at
 
-Phone number (OTP verification)
+---
 
-Email
+### 5. CONTRIBUTION_CYCLES
+Each contribution round.
 
-Full name
+- id (UUID, PK)
+- group_id (FK → groups.id)
+- cycle_number
+- collector_user_id (FK → users.id)
+- due_date
+- status (pending | completed | delayed)
 
-Password
+---
 
-Optional (Phase 2)
+### 6. PAYMENTS
+Tracks every payment.
 
-BVN
+- id (UUID, PK)
+- user_id (FK → users.id)
+- group_id (FK → groups.id)
+- cycle_id (FK → contribution_cycles.id)
+- amount
+- payment_type (contribution | deposit | penalty)
+- status (paid | pending | failed)
+- created_at
 
-Government ID
+---
 
-2. Group Creation Flow (Admin)
-Group Setup
+### 7. PENALTIES
 
-Admin must define:
+- id (UUID, PK)
+- user_id (FK → users.id)
+- group_id (FK → groups.id)
+- amount
+- reason
+- resolved (boolean)
+- created_at
+
+---
+
+### 8. TRANSACTIONS (SYSTEM LEDGER)
+
+- id (UUID, PK)
+- from_wallet
+- to_wallet
+- amount
+- transaction_type (payout | fee | penalty)
+- reference
+- created_at
+
+---
+
+### ERD SUMMARY (TEXTUAL)
+
+User → Wallet (1:1)
+User → Group_Members → Group (M:N)
+Group → Contribution_Cycles (1:N)
+Cycle → Payments (1:N)
+User → Payments (1:N)
+
+---
+
+## C. TECHNICAL ARCHITECTURE (WEB + MOBILE)
+
+### Frontend
+
+- Web App: React + TypeScript
+- Mobile App: React Native (Expo)
+- State Management: Context / Zustand
+- UI: Tailwind / Native UI
+
+---
+
+### Backend
+
+- API Layer: Node.js (NestJS or Express)
+- Auth: JWT + OTP
+- Business Logic: Contribution engine, penalties
+
+---
+
+### Database
+
+- PostgreSQL (Supabase or managed Postgres)
+- Row-level security for wallets
+
+---
+
+### Payments
+
+- Paystack
+- Webhooks for payment confirmation
+
+---
+
+### Automation
+
+- Cron jobs for:
+  - Due date checks
+  - Penalty application
+  - Automatic disbursement
+
+---
+
+### Security
+
+- Encrypted passwords
+- Wallet isolation
+- Audit logs
+
+---
+
+## D. COMPLIANCE & TRUST STRATEGY (NIGERIA)
+
+### Regulatory Positioning
+
+- Classified as: Digital Cooperative / Savings Platform
+- NOT a loan or investment product
+
+---
+
+### KYC Strategy
+
+**MVP:**
+- Phone verification
+- Email verification
+
+**Phase 2:**
+- BVN verification
+- Government ID
+
+---
+
+### Trust Mechanisms
+
+- Immutable transaction logs
+- Default blacklist system
+- Transparent group dashboards
+
+---
+
+### Legal Safeguards
+
+- Clear Terms of Service
+- Digital agreement on joining groups
+- Penalty disclosure
+
+---
+
+## E. FULL PRD (LOVABLE.DEV READY)
+
+### Product Name
+Smart Ajo (Working Name)
+
+---
+
+### Problem
+Traditional ajo systems fail due to lack of enforcement, transparency, and trust.
+
+---
+
+### Solution
+An automated ajo platform with deposits, penalties, and system-controlled payouts.
+
+---
+
+### Target Users
+
+- Salary earners
+- Traders
+- Students
+- Cooperatives
+
+---
+
+### Core Features (MVP)
+
+- User registration & verification
+- Group creation
+- contributions
+- Automated payouts
+- Security deposit enforcement
+- Penalty system
+- Transaction history
+
+---
+
+### Non-Goals
+
+- Lending
+- Investments
+- Crypto
+
+---
+
+### Monetization
+
+- 10% service fee per cycle
+
+---
+
+### Success Metrics
+
+- Group completion rate
+- Default rate
+- Monthly active users
+- Transaction volume
+
+---
+
+### Future Enhancements
+
+- BVN credit scoring
+- Insurance-backed groups
+- Business cooperatives
+- Reduced-fee premium tiers
+
+---
+
+GROUP CREATION & MEMBERSHIP FLOW (ROTATIONAL AJO LOGIC)
+1. Group Creator (Admin) Role
+
+Any verified user can create an ajo group.
+
+The group creator automatically becomes the Group Admin.
+
+The Admin has special permissions:
+
+Approve or reject join requests
+
+View all members and their rotation slots
+
+Remove defaulting members (subject to system rules)
+
+
+Important: Even though the Admin created the group, they are not exempt from payment rules and must participate like every other member.
+
+2. Group Creation Process
+
+When creating a group, the creator must define:
 
 Group name
 
-Contribution amount (e.g ₦50,000)
+Contribution amount (e.g. ₦10,000)
 
-Contribution frequency (daily / weekly / monthly /yearly)
+Contribution frequency (weekly, monthly or yearly)
 
-Number of members (e.g 10 people)
+Total number of members
 
-Total cycles
+Start date
 
-Security deposit amount
+Service fee percentage (default 10%)
 
-Penalty rules:
+Rotation method:
 
-Late payment fee
+Fixed rotation (members select slots)
 
-Grace period
+Security deposit requirement (system-defined or % of contribution)
 
-Group visibility:
+📌 After group creation:
 
-Public (discoverable)
+The group status remains pending
 
-Private (invite-only)
+The Admin must also join the group as a participant
 
-Slot Selection (Important)
+The Admin is required to:
 
-Admin selects preferred payout slot
+Select a rotation slot
 
-Available slots update dynamically
+Pay the required contribution + service fee via Paystack
 
-Once selected → slot becomes locked
+Once the Admin completes payment:
 
-Admin Initial Payment
+The Admin is marked as an active group member
 
-Before group becomes live:
+The group becomes visible to other users for join requests
 
-Admin must pay:
+3. Joining a Group (Member Flow)
 
-Security deposit
+Users do not automatically join groups.
 
-Contribution
+Step-by-step Join Flow:
 
-Payment processed via Paystack
+User views available groups
 
-Group status becomes OPEN FOR APPLICATIONS only after payment verification
+User selects a group
 
-3. Group Discovery & Application (Members)
-Group Browsing
+User selects an available rotation slot
 
-Users can browse groups by:
+User sends a join request to the group Admin
+
+At this stage:
+
+No money is charged
+
+Slot is temporarily reserved (with timeout)
+
+4. Admin Approval / Rejection
+
+The Admin receives a notification when a join request is submitted.
+
+Admin can:
+
+Approve request
+
+Reject request
+
+If Rejected:
+
+Slot is released
+
+User is notified
+
+If Approved:
+
+User is prompted to make payment via Paystack
+
+5. Payment Handling (Paystack – Entry Payment)
+
+On approval, the user must pay:
 
 Contribution amount
 
-Frequency
+Service fee
 
-Available slots
+Required security deposit (if applicable)
 
-Group status
+📌 Important Payment Rules:
 
-Displayed info:
+Initial payments are handled via Paystack
 
-Admin profile
+Payment confirmation is handled via Paystack webhooks
 
-Rules summary
+If payment succeeds:
 
-Available payout slots
+User becomes an active group member
 
-Security deposit amount
+Slot becomes permanently assigned
 
-Application to Join
+Group member record is created
 
-Applicant must:
+If payment fails:
 
-Select preferred payout slot
+Join request expires
 
-Submit application
+Slot is released
 
-Application includes:
+6. Slot Selection & Rotation Enforcement
 
-Full name
+Each group has a fixed number of rotation slots
 
-Phone number. etc
+Each slot represents a payout position (e.g. 1st, 2nd, 3rd…)
 
-4. Admin Review & Approval
+A slot can only be occupied by one user
 
-Admin dashboard shows:
+Slot order determines:
 
-Applicant profile
+Contribution cycles
 
-Selected slot
+Payout sequence
 
-Risk indicators (future: credit score)
+📌 Once the group becomes active:
 
-Admin/creator actions:
+Slots are locked
 
-Accept
+Rotation order cannot be changed
 
-Reject
+No new members can join
 
-5. Member Payment & Activation
+7. Group Activation Conditions
 
-After acceptance:
+A group automatically moves from pending → active when:
 
-Applicant must pay:
+All required slots are filled
 
-Security deposit
+All members (including Admin) have:
 
-Required contribution(s)
+Paid initial contribution
 
-Payment is:
+Paid service fee
 
-Processed via Paystack
+Paid required deposit
 
-Automatically verified
+Only then:
 
-Only after successful payment:
+Contribution cycles are generated
 
-User becomes ACTIVE MEMBER
 
-Slot becomes locked
+Automated payouts are enabled
 
-Group member count updates
+8. Contribution Cycle Execution (High-Level)
 
-6. 
-Automated Enforcement
+For each cycle:
 
-Late payment:
+All members must contribute
 
-Penalty auto-deducted
 
-Default:
+Once all payments are confirmed:
 
-Security deposit partially or fully forfeited
+Collector receives payout
 
-Member removed if threshold reached
+System deducts service fee
 
-7. Automated Payout System
+Cycle is marked completed
 
-System releases payout automatically
+Next cycle begins automatically
 
-Admin has NO CONTROL over payout
+9. Database Implications (Explicit for Developers)
 
-Payout goes to:
+This flow implies:
 
-Member assigned to that slot
+groups.creator_id = Admin
 
-Paystack transfer API used
+group_members.rotation_position = selected slot
 
-All users get payout notifications
+group_members.status tracks approval & defaults
 
-8. Transparency & Dashboard
-For All Users
+Join requests may require:
 
-Contribution history
+group_join_requests table (recommended)
 
-Payout history
+Example fields:
 
-Group progress tracker
+id
 
-Penalties applied
+group_id
 
-For Admin
+user_id
 
-Applications list
+selected_slot
 
-Member status
+status (pending | approved | rejected | expired)
 
-Payment compliance overview
+created_at
 
-9. Fees & Monetization
+10. Key Rules Summary (No Ambiguity)
 
-10% service fee per contribution cycle
+Admin ≠ owner of money
 
-Auto-deducted before escrow
+Admin must pay like everyone else
 
-Shown transparently in UI
+No automatic joining
 
-10. Group States (Important for Dev)
+Slot selection happens before approval
 
-Draft
+Paystack handles entry payments
 
-Open for applications
+Rotation order is immutable once active
 
-Locked (all slots filled)
+## END
 
-Active
-
-Completed
-
-Defaulted (edge case)
-
-11. Paystack Integration (Core Requirement)
-
-All payments must:
-
-Use Paystack Checkout
-
-Be verified via webhook
-
-Trigger:
-
-Slot locking
-
-Group activation
-
-Payout release
