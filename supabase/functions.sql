@@ -1521,6 +1521,190 @@ COMMENT ON FUNCTION mark_payout_failed IS
   'Marks a payout as failed with error details';
 
 -- ============================================================================
+-- FUNCTION: check_and_activate_group
+-- ============================================================================
+-- Checks if a group should be activated and generates contribution cycles
+-- Called when a member pays their security deposit
+-- Activates group if all positions are filled and all security deposits paid
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION check_and_activate_group(p_group_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_total_members INTEGER;
+  v_current_members INTEGER;
+  v_all_deposits_paid BOOLEAN;
+  v_group_status VARCHAR(20);
+  v_start_date TIMESTAMPTZ;
+  v_frequency VARCHAR(20);
+BEGIN
+  -- Get group details
+  SELECT total_members, current_members, status, start_date, frequency
+  INTO v_total_members, v_current_members, v_group_status, v_start_date, v_frequency
+  FROM groups
+  WHERE id = p_group_id;
+  
+  -- Only activate groups in 'forming' status
+  IF v_group_status != 'forming' THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Check if all positions are filled
+  IF v_current_members < v_total_members THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Check if all members have paid their security deposits
+  SELECT COUNT(*) = v_total_members INTO v_all_deposits_paid
+  FROM group_members
+  WHERE group_id = p_group_id
+    AND has_paid_security_deposit = TRUE
+    AND status = 'active';
+  
+  -- If all conditions met, activate the group
+  IF v_all_deposits_paid THEN
+    -- Update group status to active
+    UPDATE groups
+    SET status = 'active',
+        start_date = COALESCE(v_start_date, NOW()),
+        updated_at = NOW()
+    WHERE id = p_group_id;
+    
+    -- Generate contribution cycles
+    PERFORM generate_contribution_cycles(p_group_id);
+    
+    RETURN TRUE;
+  END IF;
+  
+  RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION check_and_activate_group IS 
+  'Checks conditions and activates group if ready, generating contribution cycles';
+
+-- ============================================================================
+-- FUNCTION: generate_contribution_cycles
+-- ============================================================================
+-- Generates all contribution cycles for a group when it becomes active
+-- Creates one cycle per member based on their position order
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION generate_contribution_cycles(p_group_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+  v_member RECORD;
+  v_cycle_number INTEGER;
+  v_start_date TIMESTAMPTZ;
+  v_due_date TIMESTAMPTZ;
+  v_frequency VARCHAR(20);
+  v_contribution_amount DECIMAL(15, 2);
+  v_service_fee_percentage INTEGER;
+  v_total_members INTEGER;
+  v_expected_amount DECIMAL(15, 2);
+  v_cycles_created INTEGER := 0;
+BEGIN
+  -- Get group details
+  SELECT start_date, frequency, contribution_amount, service_fee_percentage, total_members
+  INTO v_start_date, v_frequency, v_contribution_amount, v_service_fee_percentage, v_total_members
+  FROM groups
+  WHERE id = p_group_id;
+  
+  -- Calculate expected amount per cycle (contribution from all members)
+  v_expected_amount := v_contribution_amount * v_total_members;
+  
+  -- Generate cycles for each position
+  FOR v_member IN 
+    SELECT user_id, position
+    FROM group_members
+    WHERE group_id = p_group_id
+      AND status = 'active'
+    ORDER BY position ASC
+  LOOP
+    v_cycle_number := v_member.position;
+    
+    -- Calculate cycle dates based on frequency
+    CASE v_frequency
+      WHEN 'daily' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 day');
+      WHEN 'weekly' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 week');
+      WHEN 'monthly' THEN
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 month');
+      ELSE
+        v_due_date := v_start_date + ((v_cycle_number - 1) * INTERVAL '1 month');
+    END CASE;
+    
+    -- Insert contribution cycle
+    INSERT INTO contribution_cycles (
+      group_id,
+      cycle_number,
+      collector_user_id,
+      collector_position,
+      start_date,
+      due_date,
+      status,
+      expected_amount,
+      collected_amount,
+      payout_amount,
+      service_fee_collected
+    ) VALUES (
+      p_group_id,
+      v_cycle_number,
+      v_member.user_id,
+      v_member.position,
+      CASE 
+        WHEN v_cycle_number = 1 THEN v_start_date
+        ELSE v_due_date - (
+          CASE v_frequency
+            WHEN 'daily' THEN INTERVAL '1 day'
+            WHEN 'weekly' THEN INTERVAL '1 week'
+            WHEN 'monthly' THEN INTERVAL '1 month'
+            ELSE INTERVAL '1 month'
+          END
+        )
+      END,
+      v_due_date,
+      CASE WHEN v_cycle_number = 1 THEN 'active' ELSE 'pending' END,
+      v_expected_amount,
+      0,
+      0,
+      0
+    );
+    
+    v_cycles_created := v_cycles_created + 1;
+    
+    -- Create contribution records for all members for this cycle
+    INSERT INTO contributions (
+      group_id,
+      user_id,
+      cycle_number,
+      amount,
+      service_fee,
+      due_date,
+      status
+    )
+    SELECT
+      p_group_id,
+      gm.user_id,
+      v_cycle_number,
+      v_contribution_amount,
+      ROUND(v_contribution_amount * v_service_fee_percentage / 100, 2),
+      v_due_date,
+      'pending'
+    FROM group_members gm
+    WHERE gm.group_id = p_group_id
+      AND gm.status = 'active';
+  END LOOP;
+  
+  RETURN v_cycles_created;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION generate_contribution_cycles IS 
+  'Generates all contribution cycles for an active group based on member positions';
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --

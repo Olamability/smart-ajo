@@ -8,6 +8,31 @@
 -- ============================================================================
 
 -- ============================================================================
+-- TRIGGER: Auto-create wallet for new users
+-- ============================================================================
+-- Automatically creates a wallet when a new user is created
+-- Ensures every user has a wallet from the start
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION create_user_wallet()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Create wallet for the new user with zero balance
+  INSERT INTO wallets (user_id, balance, locked_balance)
+  VALUES (NEW.id, 0, 0);
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to auto-create wallet on user creation
+DROP TRIGGER IF EXISTS trigger_create_user_wallet ON users;
+CREATE TRIGGER trigger_create_user_wallet
+  AFTER INSERT ON users
+  FOR EACH ROW
+  EXECUTE FUNCTION create_user_wallet();
+
+-- ============================================================================
 -- TRIGGER: Auto-create notifications on contribution payment
 -- ============================================================================
 -- Creates notification when a contribution is paid
@@ -708,5 +733,35 @@ COMMENT ON TRIGGER trigger_update_group_member_count ON group_members IS
 
 COMMENT ON FUNCTION auto_add_creator_as_member IS 
   'DISABLED TRIGGER: Creator is now added to group after payment with selected slot. Function retained for manual use only.';
+
+-- ============================================================================
+-- TRIGGER: Check and activate group on security deposit payment
+-- ============================================================================
+-- When a member pays their security deposit, check if group is ready to activate
+-- If all positions filled and all deposits paid, activate group and generate cycles
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION trigger_check_group_activation()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only proceed if security deposit status changed to TRUE
+  IF NEW.has_paid_security_deposit = TRUE AND 
+     (OLD.has_paid_security_deposit IS NULL OR OLD.has_paid_security_deposit = FALSE) THEN
+    -- Check if group should be activated
+    PERFORM check_and_activate_group(NEW.group_id);
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_group_activation ON group_members;
+CREATE TRIGGER trigger_group_activation
+  AFTER UPDATE ON group_members
+  FOR EACH ROW
+  EXECUTE FUNCTION trigger_check_group_activation();
+
+COMMENT ON TRIGGER trigger_group_activation ON group_members IS 
+  'Checks if group should be activated when member pays security deposit';
 
 -- ============================================================================

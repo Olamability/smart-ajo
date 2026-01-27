@@ -86,6 +86,29 @@ CREATE INDEX idx_email_verification_tokens_token ON email_verification_tokens(to
 CREATE INDEX idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
 
 -- ============================================================================
+-- TABLE: wallets
+-- ============================================================================
+-- Each user has an internal wallet for fund management
+-- Balance tracks available funds, locked_balance tracks escrowed funds
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS wallets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  
+  -- Balances
+  balance DECIMAL(15, 2) DEFAULT 0 CHECK (balance >= 0),
+  locked_balance DECIMAL(15, 2) DEFAULT 0 CHECK (locked_balance >= 0),
+  
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for wallets table
+CREATE INDEX idx_wallets_user_id ON wallets(user_id);
+
+-- ============================================================================
 -- TABLE: groups
 -- ============================================================================
 -- Represents savings groups (ROSCA circles)
@@ -231,6 +254,52 @@ ALTER TABLE contributions
 ADD COLUMN IF NOT EXISTS is_overdue boolean GENERATED ALWAYS AS (due_date < NOW() AND status = 'pending') STORED;
 
 CREATE INDEX IF NOT EXISTS idx_contributions_is_overdue ON contributions(is_overdue);
+
+-- ============================================================================
+-- TABLE: contribution_cycles
+-- ============================================================================
+-- Represents each contribution round in a group
+-- Generated when group becomes active, one cycle per member
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS contribution_cycles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  
+  -- Cycle Information
+  cycle_number INTEGER NOT NULL CHECK (cycle_number >= 1),
+  collector_user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  collector_position INTEGER NOT NULL CHECK (collector_position >= 1),
+  
+  -- Dates
+  start_date TIMESTAMPTZ NOT NULL,
+  due_date TIMESTAMPTZ NOT NULL,
+  completion_date TIMESTAMPTZ,
+  
+  -- Status
+  status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'completed', 'delayed', 'failed')),
+  
+  -- Financial Tracking
+  expected_amount DECIMAL(15, 2) NOT NULL CHECK (expected_amount > 0),
+  collected_amount DECIMAL(15, 2) DEFAULT 0 CHECK (collected_amount >= 0),
+  payout_amount DECIMAL(15, 2) DEFAULT 0 CHECK (payout_amount >= 0),
+  service_fee_collected DECIMAL(15, 2) DEFAULT 0 CHECK (service_fee_collected >= 0),
+  
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  
+  -- Constraints
+  UNIQUE(group_id, cycle_number),
+  UNIQUE(group_id, collector_user_id)
+);
+
+-- Indexes for contribution_cycles table
+CREATE INDEX idx_contribution_cycles_group_id ON contribution_cycles(group_id);
+CREATE INDEX idx_contribution_cycles_collector ON contribution_cycles(collector_user_id);
+CREATE INDEX idx_contribution_cycles_status ON contribution_cycles(status);
+CREATE INDEX idx_contribution_cycles_due_date ON contribution_cycles(due_date);
+CREATE INDEX idx_contribution_cycles_active ON contribution_cycles(group_id, cycle_number) WHERE status = 'active';
 
 
 -- ============================================================================
@@ -771,9 +840,11 @@ COMMENT ON FUNCTION is_current_user_admin IS 'Returns TRUE if the current authen
 -- Enable RLS on all tables
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE email_verification_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contributions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contribution_cycles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE penalties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
@@ -844,6 +915,41 @@ CREATE POLICY email_verification_tokens_update_own ON email_verification_tokens
 
 -- Service role can do anything
 CREATE POLICY email_verification_tokens_service_role_all ON email_verification_tokens
+  FOR ALL
+  USING (
+    CASE 
+      WHEN current_setting('role', true) = 'service_role' THEN true
+      ELSE false
+    END
+  );
+
+-- ============================================================================
+-- RLS POLICIES: wallets
+-- ============================================================================
+
+-- Users can view only their own wallet (strict isolation)
+CREATE POLICY wallets_select_own ON wallets
+  FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Users can update their own wallet (for internal transfers)
+CREATE POLICY wallets_update_own ON wallets
+  FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Wallets are auto-created via trigger, but allow service role to insert
+CREATE POLICY wallets_insert_service ON wallets
+  FOR INSERT
+  WITH CHECK (
+    CASE 
+      WHEN current_setting('role', true) = 'service_role' THEN true
+      ELSE false
+    END
+  );
+
+-- Service role can do anything (for automated operations)
+CREATE POLICY wallets_service_role_all ON wallets
   FOR ALL
   USING (
     CASE 
@@ -981,6 +1087,29 @@ CREATE POLICY contributions_update_own ON contributions
 
 -- Service role can do anything
 CREATE POLICY contributions_service_role_all ON contributions
+  FOR ALL
+  USING (
+    CASE 
+      WHEN current_setting('role', true) = 'service_role' THEN true
+      ELSE false
+    END
+  );
+
+-- ============================================================================
+-- RLS POLICIES: contribution_cycles
+-- ============================================================================
+
+-- Users can view cycles for groups they're in
+-- Platform admins can view all cycles
+CREATE POLICY contribution_cycles_select_group_members ON contribution_cycles
+  FOR SELECT
+  USING (
+    is_group_member(auth.uid(), contribution_cycles.group_id) OR
+    is_current_user_admin()
+  );
+
+-- Service role can do anything (cycles are auto-generated)
+CREATE POLICY contribution_cycles_service_role_all ON contribution_cycles
   FOR ALL
   USING (
     CASE 
