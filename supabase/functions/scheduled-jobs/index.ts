@@ -276,7 +276,7 @@ async function processCycles(supabase: any): Promise<JobResult> {
         }
         
         // Create payout record
-        const { error: payoutError } = await supabase
+        const { data: payoutData, error: payoutError } = await supabase
           .from('payouts')
           .insert({
             related_group_id: cycle.group_id,
@@ -285,11 +285,25 @@ async function processCycles(supabase: any): Promise<JobResult> {
             amount: payoutAmount,
             status: 'pending',
             payment_method: 'wallet_transfer',
-          });
+          })
+          .select()
+          .single();
         
         if (payoutError) {
           console.error(`Error creating payout for cycle ${cycle.id}:`, payoutError);
           continue;
+        }
+        
+        // Process payout to wallet (credit recipient's wallet)
+        if (payoutData) {
+          const { error: walletPayoutError } = await supabase
+            .rpc('process_payout_to_wallet', { p_payout_id: payoutData.id });
+          
+          if (walletPayoutError) {
+            console.error(`Error processing payout to wallet:`, walletPayoutError);
+          } else {
+            console.log(`Successfully credited wallet for payout ${payoutData.id}`);
+          }
         }
         
         // Activate next cycle if it exists

@@ -1705,6 +1705,177 @@ COMMENT ON FUNCTION generate_contribution_cycles IS
   'Generates all contribution cycles for an active group based on member positions';
 
 -- ============================================================================
+-- FUNCTION: process_payout_to_wallet
+-- ============================================================================
+-- Processes a payout by transferring funds to the recipient's wallet
+-- Creates transaction record for audit trail
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION process_payout_to_wallet(
+  p_payout_id UUID
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_payout RECORD;
+  v_recipient_wallet_id UUID;
+  v_system_wallet_id UUID;
+  v_transaction_ref VARCHAR(255);
+BEGIN
+  -- Get payout details
+  SELECT * INTO v_payout
+  FROM payouts
+  WHERE id = p_payout_id
+    AND status = 'pending';
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payout not found or already processed';
+  END IF;
+  
+  -- Get recipient's wallet
+  SELECT id INTO v_recipient_wallet_id
+  FROM wallets
+  WHERE user_id = v_payout.recipient_id;
+  
+  IF v_recipient_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Recipient wallet not found';
+  END IF;
+  
+  -- Generate transaction reference
+  v_transaction_ref := 'PAYOUT-' || v_payout.related_group_id || '-C' || v_payout.cycle_number;
+  
+  -- Credit recipient's wallet
+  UPDATE wallets
+  SET balance = balance + v_payout.amount,
+      updated_at = NOW()
+  WHERE id = v_recipient_wallet_id;
+  
+  -- Create transaction record
+  INSERT INTO transactions (
+    from_wallet_id,
+    to_wallet_id,
+    amount,
+    transaction_type,
+    reference,
+    metadata
+  ) VALUES (
+    NULL, -- System credit
+    v_recipient_wallet_id,
+    v_payout.amount,
+    'payout',
+    v_transaction_ref,
+    jsonb_build_object(
+      'payout_id', v_payout.id,
+      'group_id', v_payout.related_group_id,
+      'cycle_number', v_payout.cycle_number
+    )
+  );
+  
+  -- Update payout status
+  UPDATE payouts
+  SET status = 'completed',
+      payout_date = NOW(),
+      payment_reference = v_transaction_ref,
+      updated_at = NOW()
+  WHERE id = p_payout_id;
+  
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION process_payout_to_wallet IS 
+  'Processes a payout by crediting recipient wallet and creating transaction record';
+
+-- ============================================================================
+-- FUNCTION: transfer_wallet_funds
+-- ============================================================================
+-- Transfers funds between two wallets
+-- Used for internal transfers, penalties, etc.
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION transfer_wallet_funds(
+  p_from_user_id UUID,
+  p_to_user_id UUID,
+  p_amount DECIMAL(15, 2),
+  p_transaction_type VARCHAR(50),
+  p_reference VARCHAR(255),
+  p_metadata JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+DECLARE
+  v_from_wallet_id UUID;
+  v_to_wallet_id UUID;
+  v_transaction_id UUID;
+BEGIN
+  -- Validate amount
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'Transfer amount must be positive';
+  END IF;
+  
+  -- Get sender's wallet
+  SELECT id INTO v_from_wallet_id
+  FROM wallets
+  WHERE user_id = p_from_user_id;
+  
+  IF v_from_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Sender wallet not found';
+  END IF;
+  
+  -- Get recipient's wallet
+  SELECT id INTO v_to_wallet_id
+  FROM wallets
+  WHERE user_id = p_to_user_id;
+  
+  IF v_to_wallet_id IS NULL THEN
+    RAISE EXCEPTION 'Recipient wallet not found';
+  END IF;
+  
+  -- Check sufficient balance
+  IF NOT EXISTS (
+    SELECT 1 FROM wallets
+    WHERE id = v_from_wallet_id
+      AND balance >= p_amount
+  ) THEN
+    RAISE EXCEPTION 'Insufficient balance';
+  END IF;
+  
+  -- Debit sender's wallet
+  UPDATE wallets
+  SET balance = balance - p_amount,
+      updated_at = NOW()
+  WHERE id = v_from_wallet_id;
+  
+  -- Credit recipient's wallet
+  UPDATE wallets
+  SET balance = balance + p_amount,
+      updated_at = NOW()
+  WHERE id = v_to_wallet_id;
+  
+  -- Create transaction record
+  INSERT INTO transactions (
+    from_wallet_id,
+    to_wallet_id,
+    amount,
+    transaction_type,
+    reference,
+    metadata
+  ) VALUES (
+    v_from_wallet_id,
+    v_to_wallet_id,
+    p_amount,
+    p_transaction_type,
+    p_reference,
+    p_metadata
+  )
+  RETURNING id INTO v_transaction_id;
+  
+  RETURN v_transaction_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION transfer_wallet_funds IS 
+  'Transfers funds between two user wallets with transaction tracking';
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --
