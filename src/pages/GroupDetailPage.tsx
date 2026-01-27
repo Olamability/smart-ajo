@@ -19,6 +19,7 @@ import { paystackService, PaystackResponse } from '@/lib/paystack';
 import ContributionsList from '@/components/ContributionsList';
 import PayoutSchedule from '@/components/PayoutSchedule';
 import SlotSelector from '@/components/SlotSelector';
+import PaymentBreakdown from '@/components/PaymentBreakdown';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -488,20 +489,21 @@ export default function GroupDetailPage() {
             <Alert className="bg-orange-50 border-orange-200">
               <AlertCircle className="h-4 w-4 text-orange-600" />
               <AlertDescription>
-                <span className="text-orange-900 font-semibold">
-                  Complete Your Group Setup
-                </span>
-                <p className="text-sm text-orange-700 mt-1">
-                  As the group creator, you need to select your payout slot and complete your payment 
-                  (security deposit + first contribution) to activate the group.
-                </p>
+                <div>
+                  <span className="text-orange-900 font-semibold">
+                    Complete Your Group Setup
+                  </span>
+                  <p className="text-sm text-orange-700 mt-1">
+                    As the group creator, select your payout position and complete your payment to activate the group.
+                  </p>
+                </div>
               </AlertDescription>
             </Alert>
             
             {/* Slot Selection for Creator */}
             <Card>
               <CardHeader>
-                <CardTitle>Select Your Payout Slot</CardTitle>
+                <CardTitle>Select Your Payout Position</CardTitle>
                 <CardDescription>
                   Choose when you'd like to receive your payout in the rotation cycle
                 </CardDescription>
@@ -515,30 +517,40 @@ export default function GroupDetailPage() {
                 />
                 
                 {selectedSlot && (
-                  <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-green-600" />
-                      <span className="text-green-900 font-semibold">
-                        Slot {selectedSlot} Selected
-                      </span>
+                  <div className="mt-4 space-y-3">
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle className="w-5 h-5 text-blue-600" />
+                        <span className="text-blue-900 font-semibold">
+                          Position #{selectedSlot} Selected
+                        </span>
+                      </div>
+                      <p className="text-sm text-blue-700">
+                        You will receive your payout during cycle {selectedSlot}
+                      </p>
                     </div>
-                    <p className="text-sm text-green-700 mt-1">
-                      You'll receive your payout during cycle {selectedSlot}
-                    </p>
+
+                    <PaymentBreakdown
+                      securityDepositAmount={group.securityDepositAmount}
+                      contributionAmount={group.contributionAmount}
+                      formatCurrency={formatCurrency}
+                    />
+
                     <Button
                       onClick={handlePaySecurityDeposit}
                       disabled={isProcessingPayment}
-                      className="mt-3 w-full"
+                      className="w-full"
+                      size="lg"
                     >
                       {isProcessingPayment ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Processing...
+                          Processing Payment...
                         </>
                       ) : (
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
-                          Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)}
+                          Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)} to Activate Group
                         </>
                       )}
                     </Button>
@@ -549,29 +561,60 @@ export default function GroupDetailPage() {
           </div>
         )}
 
-        {/* Status Alert - Show payment prompt for members who haven't paid */}
+        {/* Status Alert - Show payment prompt for approved members who haven't paid */}
         {currentUserMember && !currentUserMember.securityDepositPaid && !isCreator && group?.status === 'forming' && (
           <Alert className="bg-green-50 border-green-200">
             <CheckCircle className="h-4 w-4 text-green-600" />
-            <AlertDescription className="flex items-center justify-between">
-              <div>
-                <span className="text-green-900 font-semibold">
-                  Welcome to the group!
-                </span>
-                <p className="text-sm text-green-700 mt-1">
-                  Complete your payment (security deposit + first contribution) to fully activate your membership.
-                  Your position: {currentUserMember.rotationPosition}
-                </p>
+            <AlertDescription>
+              <div className="space-y-3">
+                <div>
+                  <span className="text-green-900 font-semibold">
+                    ✅ Your request has been approved!
+                  </span>
+                  <p className="text-sm text-green-700 mt-1">
+                    Complete your payment to activate your membership and secure your payout position.
+                  </p>
+                </div>
+                
+                <div className="p-3 bg-white border border-green-200 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-700">Your Payout Position:</span>
+                    <Badge className="bg-primary text-lg">
+                      #{currentUserMember.rotationPosition}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-gray-600">
+                    You will receive your payout during cycle {currentUserMember.rotationPosition}
+                  </p>
+                </div>
+
+                <div className="border-green-200">
+                  <PaymentBreakdown
+                    securityDepositAmount={group.securityDepositAmount}
+                    contributionAmount={group.contributionAmount}
+                    formatCurrency={formatCurrency}
+                  />
+                </div>
+
+                <Button
+                  onClick={handlePaySecurityDeposit}
+                  disabled={isProcessingPayment}
+                  className="w-full"
+                  size="lg"
+                >
+                  {isProcessingPayment ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processing Payment...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)} to Join
+                    </>
+                  )}
+                </Button>
               </div>
-              <Button
-                onClick={handlePaySecurityDeposit}
-                disabled={isProcessingPayment}
-                size="sm"
-                className="ml-4"
-              >
-                <CreditCard className="w-4 h-4 mr-2" />
-                Pay Now
-              </Button>
             </AlertDescription>
           </Alert>
         )}
