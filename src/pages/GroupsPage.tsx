@@ -73,18 +73,20 @@ export default function GroupsPage() {
 
   // Check if user needs to make payment for a group
   const needsPayment = (group: ApiGroup): boolean => {
-    if (!user) return false;
+    if (!user || group.status !== 'forming') return false;
     
     // Check if user is a member who hasn't paid security deposit
     const currentUserMember = group.members?.find(m => m.userId === user.id);
-    if (currentUserMember && !currentUserMember.securityDepositPaid && group.status === 'forming') {
-      return true;
+    
+    // If user is a member, check if they've paid
+    if (currentUserMember) {
+      return !currentUserMember.securityDepositPaid;
     }
     
-    // Check if user is the creator who hasn't paid
+    // If user is the creator but not yet in members array, they need to pay
     const isCreator = group.createdBy === user.id;
-    if (isCreator && !currentUserMember?.securityDepositPaid && group.status === 'forming') {
-      return true;
+    if (isCreator) {
+      return true; // Creator needs to pay to become a member
     }
     
     return false;
@@ -94,6 +96,9 @@ export default function GroupsPage() {
     e.stopPropagation(); // Prevent card click navigation
     navigate(`/groups/${groupId}#payment`);
   };
+
+  // Memoize groups that need payment to avoid repeated filtering
+  const groupsNeedingPayment = groups.filter(needsPayment);
 
   if (loading) {
     return (
@@ -145,7 +150,7 @@ export default function GroupsPage() {
         </div>
 
         {/* Pending Payments Alert - Show groups requiring payment */}
-        {groups.filter(needsPayment).length > 0 && (
+        {groupsNeedingPayment.length > 0 && (
           <Card className="border-orange-200 bg-orange-50">
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
@@ -155,11 +160,11 @@ export default function GroupsPage() {
                     Payment Required
                   </h3>
                   <p className="text-sm text-orange-700 mb-3">
-                    You have {groups.filter(needsPayment).length} {groups.filter(needsPayment).length === 1 ? 'group' : 'groups'} waiting for payment. 
+                    You have {groupsNeedingPayment.length} {groupsNeedingPayment.length === 1 ? 'group' : 'groups'} waiting for payment. 
                     Complete your security deposit to activate your membership.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {groups.filter(needsPayment).map((group) => (
+                    {groupsNeedingPayment.map((group) => (
                       <Badge
                         key={group.id}
                         variant="outline"
