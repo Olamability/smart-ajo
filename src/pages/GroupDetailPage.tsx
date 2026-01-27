@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { 
   getGroupById, 
@@ -79,7 +79,7 @@ export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +95,7 @@ export default function GroupDetailPage() {
   // State for join request status tracking
   const [userJoinRequest, setUserJoinRequest] = useState<any>(null);
 
+  // Initial load effect
   useEffect(() => {
     if (id) {
       loadGroupDetails();
@@ -105,45 +106,26 @@ export default function GroupDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Reload data when returning to the page (e.g., after payment)
-  // This effect runs when the location state indicates return from payment
+  // Handle reload parameter from payment success page
+  // This ensures data is refetched after payment verification
   useEffect(() => {
-    const fromPayment = location.state?.fromPayment;
-    if (id && fromPayment) {
-      // Only log in development
+    const shouldReload = searchParams.get('reload');
+    if (id && shouldReload === 'true') {
       if (import.meta.env.DEV) {
         console.log('Reloading data after payment verification...');
       }
-      // Reload all data when returning from payment
-      // The verify-payment Edge Function completes synchronously before returning,
-      // so membership state should already be updated in the database
+      
+      // Reload all data to reflect updated membership status
       loadGroupDetails();
       loadMembers();
       loadJoinRequests();
       loadUserJoinRequestStatus();
       
-      // Clear the state to avoid reloading on every render
-      navigate(location.pathname, { replace: true, state: {} });
+      // Remove the reload parameter from URL to avoid reloading on every render
+      navigate(`/groups/${id}`, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state?.fromPayment, id]);
-
-  // Reload members data when page regains focus (e.g., after payment)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && id) {
-        loadMembers();
-        loadGroupDetails();
-        loadJoinRequests();
-        loadUserJoinRequestStatus();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [id]);
+  }, [searchParams, id]);
 
   const loadGroupDetails = async () => {
     if (!id) return;

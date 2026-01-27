@@ -153,6 +153,11 @@ async function storePaymentRecord(
   supabase: any,
   paystackData: PaystackVerificationResponse['data']
 ): Promise<{ success: boolean; message: string }> {
+  console.log('=== STORING PAYMENT RECORD ===');
+  console.log('Paystack data status:', paystackData.status);
+  console.log('Paystack data reference:', paystackData.reference);
+  console.log('Will set verified to:', paystackData.status === 'success');
+  
   const paymentData = {
     reference: paystackData.reference,
     user_id: paystackData.metadata?.user_id,
@@ -172,6 +177,13 @@ async function storePaymentRecord(
     domain: paystackData.domain,
     updated_at: new Date().toISOString(),
   };
+  
+  console.log('Payment data to store:', {
+    reference: paymentData.reference,
+    status: paymentData.status,
+    verified: paymentData.verified,
+    amount: paymentData.amount
+  });
 
   // Check if payment already exists (idempotency)
   const { data: existing, error: existingError } = await supabase
@@ -209,8 +221,13 @@ async function storePaymentRecord(
         message: 'Failed to update payment record',
       };
     }
+    
+    // Log successful update with new status
+    console.log(`Payment ${paystackData.reference} updated successfully with status: ${paymentData.status}, verified: ${paymentData.verified}`);
   } else {
     // New payment - insert it
+    console.log(`Inserting new payment with status: ${paymentData.status}, verified: ${paymentData.verified}`);
+    
     const { error } = await supabase
       .from('payments')
       .insert(paymentData);
@@ -222,6 +239,8 @@ async function storePaymentRecord(
         message: 'Failed to create payment record',
       };
     }
+    
+    console.log(`Payment ${paystackData.reference} inserted successfully`);
   }
 
   return {
@@ -473,6 +492,25 @@ serve(async (req) => {
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
     console.log('Store result:', storeResult);
     
+    // Verify the payment was actually updated in the database
+    if (storeResult.success) {
+      const { data: verifiedPayment, error: verifyError } = await supabase
+        .from('payments')
+        .select('id, reference, status, verified')
+        .eq('reference', verificationResponse.data.reference)
+        .maybeSingle();
+      
+      if (!verifyError && verifiedPayment) {
+        console.log('Payment record in database after storage:', {
+          reference: verifiedPayment.reference,
+          status: verifiedPayment.status,
+          verified: verifiedPayment.verified
+        });
+      } else {
+        console.error('Failed to verify payment record was saved:', verifyError);
+      }
+    }
+    
     if (!storeResult.success) {
       console.error('Failed to store payment record:', storeResult.message);
       return new Response(
@@ -587,6 +625,39 @@ serve(async (req) => {
       }
       
       console.log('Business logic executed:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
+      
+      // CRITICAL FIX: Explicitly ensure payment status is 'success' after business logic completes
+      // This is a final safety check to guarantee the payment record reflects the successful state.
+      // NOTE: This is intentionally redundant with storePaymentRecord() to ensure reliability.
+      // The initial storage may fail silently in edge cases (RLS issues, race conditions, etc.),
+      // so this final update after business logic success acts as a safety net.
+      if (businessLogicResult?.success) {
+        console.log('Ensuring payment status is set to success in database...');
+        const { error: finalUpdateError } = await supabase
+          .from('payments')
+          .update({ 
+            status: 'success',
+            verified: true,
+            updated_at: new Date().toISOString()
+          })
+          .eq('reference', verificationResponse.data.reference);
+        
+        if (finalUpdateError) {
+          console.error('WARNING: Failed to update payment status to success:', finalUpdateError);
+          // Don't fail the entire operation, but log this for investigation
+        } else {
+          console.log('Payment status confirmed as success in database');
+          
+          // Double-check the update worked
+          const { data: finalCheck } = await supabase
+            .from('payments')
+            .select('status, verified')
+            .eq('reference', verificationResponse.data.reference)
+            .maybeSingle();
+          
+          console.log('Final payment status check:', finalCheck);
+        }
+      }
     }
 
     console.log('Payment verified and processed successfully');
