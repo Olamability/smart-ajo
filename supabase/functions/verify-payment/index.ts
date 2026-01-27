@@ -1,41 +1,49 @@
 /**
- * Payment Verification Edge Function
+ * Payment Verification Edge Function - Clean Implementation
  * 
- * This function implements Paystack's mandatory verification flow:
+ * This is the PRIMARY payment processor. It:
+ * 1. Verifies payment with Paystack API using secret key
+ * 2. Stores/updates payment record in database
+ * 3. Executes business logic immediately (add member, create contribution, etc.)
+ * 4. Returns verification result to frontend
  * 
- * ✅ WHAT THIS FUNCTION DOES:
- * 1. Verifies payment with Paystack API using GET /transaction/verify/:reference
- * 2. Stores payment record in the 'payments' table
- * 3. EXECUTES BUSINESS LOGIC immediately (adds members, creates contributions, etc.)
- * 4. Returns verification status + position to frontend
+ * This function runs synchronously when user completes payment, so membership
+ * activation happens immediately - no polling or waiting required.
  * 
- * This is the PRIMARY payment processing path. Business logic happens here synchronously
- * so users are activated immediately after payment verification.
- * 
- * The paystack-webhook function acts as a backup/secondary processor with the same logic
- * for reliability (handles cases where user closes browser before verification completes).
+ * The paystack-webhook function acts as a BACKUP with same logic for reliability.
  * 
  * Security:
+ * - Requires user authentication (JWT token)
  * - Uses Paystack SECRET key (never exposed to frontend)
- * - Requires user authentication
  * - Idempotent (safe to call multiple times)
  * 
  * Usage:
  * POST /verify-payment
+ * Headers: { "Authorization": "Bearer <jwt_token>" }
  * Body: { "reference": "payment_reference" }
- * Headers: { "Authorization": "Bearer <user_token>" }
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { processGroupCreationPayment, processGroupJoinPayment } from "../_shared/payment-processor.ts";
+import {
+  processGroupCreationPayment,
+  processGroupJoinPayment,
+} from "../_shared/payment-processor.ts";
+
+// ============================================================================
+// CORS HEADERS
+// ============================================================================
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Max-Age': '86400', // Cache preflight for 24 hours (86400 seconds)
+  'Access-Control-Max-Age': '86400',
 };
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface VerifyPaymentRequest {
   reference: string;
@@ -86,6 +94,10 @@ interface PaystackVerificationResponse {
   };
 }
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
 /**
  * Verify payment with Paystack API
  */
@@ -93,11 +105,10 @@ async function verifyWithPaystack(
   reference: string,
   secretKey: string
 ): Promise<PaystackVerificationResponse> {
-  console.log(`Verifying payment with Paystack: ${reference}`);
+  console.log('[Paystack API] Verifying payment:', reference);
   
-  // Create abort controller for timeout
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
   
   try {
     const response = await fetch(
@@ -113,32 +124,30 @@ async function verifyWithPaystack(
     );
 
     clearTimeout(timeoutId);
-    console.log(`Paystack API response status: ${response.status}`);
+    console.log('[Paystack API] Response status:', response.status);
 
     if (!response.ok) {
       let errorMessage = 'Paystack verification failed';
       try {
         const error = await response.json();
         errorMessage = error.message || errorMessage;
-        console.error('Paystack API error:', error);
+        console.error('[Paystack API] Error:', error);
       } catch (parseError) {
         const text = await response.text();
-        console.error('Paystack API error (non-JSON):', text);
-        console.error('Parse error:', parseError);
+        console.error('[Paystack API] Non-JSON error:', text);
         errorMessage = `HTTP ${response.status}: ${text || errorMessage}`;
       }
       throw new Error(errorMessage);
     }
 
     const result = await response.json();
-    console.log(`Paystack verification result - status: ${result.status}, data.status: ${result.data?.status}`);
+    console.log('[Paystack API] Verification result:', result.data?.status);
     return result;
   } catch (error) {
     clearTimeout(timeoutId);
     
-    // Handle abort/timeout
     if (error.name === 'AbortError') {
-      console.error('Paystack API request timed out after 30 seconds');
+      console.error('[Paystack API] Request timed out');
       throw new Error('Payment verification timed out. Please try again.');
     }
     
@@ -148,15 +157,14 @@ async function verifyWithPaystack(
 
 /**
  * Store or update payment record in database
+ * Idempotent: Safe to call multiple times
  */
 async function storePaymentRecord(
   supabase: any,
   paystackData: PaystackVerificationResponse['data']
 ): Promise<{ success: boolean; message: string }> {
-  console.log('=== STORING PAYMENT RECORD ===');
-  console.log('Paystack data status:', paystackData.status);
-  console.log('Paystack data reference:', paystackData.reference);
-  console.log('Will set verified to:', paystackData.status === 'success');
+  console.log('[Payment Store] Storing payment:', paystackData.reference);
+  console.log('[Payment Store] Status:', paystackData.status);
   
   const paymentData = {
     reference: paystackData.reference,
@@ -177,15 +185,8 @@ async function storePaymentRecord(
     domain: paystackData.domain,
     updated_at: new Date().toISOString(),
   };
-  
-  console.log('Payment data to store:', {
-    reference: paymentData.reference,
-    status: paymentData.status,
-    verified: paymentData.verified,
-    amount: paymentData.amount
-  });
 
-  // Check if payment already exists (idempotency)
+  // Check if payment exists (idempotency)
   const { data: existing, error: existingError } = await supabase
     .from('payments')
     .select('id, verified, status')
@@ -193,7 +194,7 @@ async function storePaymentRecord(
     .maybeSingle();
 
   if (existingError) {
-    console.error('Error checking existing payment:', existingError);
+    console.error('[Payment Store] Error checking existing payment:', existingError);
     return {
       success: false,
       message: 'Failed to check payment status',
@@ -201,46 +202,45 @@ async function storePaymentRecord(
   }
 
   if (existing) {
-    // Payment exists - update it only if not already verified
+    // Already processed
     if (existing.verified && existing.status === 'success') {
+      console.log('[Payment Store] Already verified');
       return {
         success: true,
         message: 'Payment already verified',
       };
     }
 
+    // Update existing record
     const { error } = await supabase
       .from('payments')
       .update(paymentData)
       .eq('reference', paystackData.reference);
 
     if (error) {
-      console.error('Failed to update payment:', error);
+      console.error('[Payment Store] Update failed:', error);
       return {
         success: false,
         message: 'Failed to update payment record',
       };
     }
     
-    // Log successful update with new status
-    console.log(`Payment ${paystackData.reference} updated successfully with status: ${paymentData.status}, verified: ${paymentData.verified}`);
+    console.log('[Payment Store] Payment updated');
   } else {
-    // New payment - insert it
-    console.log(`Inserting new payment with status: ${paymentData.status}, verified: ${paymentData.verified}`);
-    
+    // Insert new record
     const { error } = await supabase
       .from('payments')
       .insert(paymentData);
 
     if (error) {
-      console.error('Failed to insert payment:', error);
+      console.error('[Payment Store] Insert failed:', error);
       return {
         success: false,
         message: 'Failed to create payment record',
       };
     }
     
-    console.log(`Payment ${paystackData.reference} inserted successfully`);
+    console.log('[Payment Store] Payment created');
   }
 
   return {
@@ -249,12 +249,12 @@ async function storePaymentRecord(
   };
 }
 
-/**
- * Execute business logic based on payment type
- * ALL business logic MUST be executed here on the backend
- */
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
+
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { 
       status: 204,
@@ -263,22 +263,19 @@ serve(async (req) => {
   }
 
   try {
-    // Verify authentication - extract JWT token
-    const authHeader = req.headers.get('Authorization');
-    console.log('=== AUTH CHECK START ===');
-    console.log('Authorization header present:', !!authHeader);
-    console.log('Authorization header format valid:', authHeader?.startsWith('Bearer ') || false);
+    console.log('=== PAYMENT VERIFICATION START ===');
     console.log('Timestamp:', new Date().toISOString());
     
+    // Verify authentication
+    const authHeader = req.headers.get('Authorization');
+    console.log('[Auth] Authorization header present:', !!authHeader);
+    
     if (!authHeader) {
-      console.error('CRITICAL: Missing authorization header');
-      console.error('Available request headers:', Array.from(req.headers.entries()).map(([k]) => k).join(', '));
-      console.error('This suggests the frontend did not pass the Authorization header');
+      console.error('[Auth] Missing authorization header');
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
-          message: 'Authentication required. Please ensure you are logged in.',
-          details: 'No Authorization header provided in request',
+          message: 'Authentication required',
         }),
         {
           status: 401,
@@ -287,17 +284,17 @@ serve(async (req) => {
       );
     }
 
-    // Get Supabase configuration
+    // Get environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
     
-    console.log('Supabase URL configured:', !!supabaseUrl);
-    console.log('Anon key configured:', !!supabaseAnonKey);
-    console.log('Service key configured:', !!supabaseServiceKey);
+    console.log('[Config] Supabase URL configured:', !!supabaseUrl);
+    console.log('[Config] Paystack secret configured:', !!paystackSecret);
     
-    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-      console.error('Supabase configuration missing');
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey || !paystackSecret) {
+      console.error('[Config] Missing required environment variables');
       return new Response(
         JSON.stringify({ error: 'Server configuration error' }),
         {
@@ -307,19 +304,16 @@ serve(async (req) => {
       );
     }
 
-    // Extract JWT token from Authorization header for format validation
-    // Note: We don't pass this to auth.getUser() - the client uses the header directly
+    // Validate JWT format
     const jwt = authHeader.replace('Bearer ', '');
-    console.log('JWT token extracted for validation. Length:', jwt.length);
+    console.log('[Auth] JWT length:', jwt.length);
     
-    // JWT format validation - must have exactly 3 parts (header.payload.signature)
     if (!jwt || jwt.length < 20 || jwt.split('.').length !== 3) {
-      console.error('Invalid JWT format detected. Parts:', jwt.split('.').length);
+      console.error('[Auth] Invalid JWT format');
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
-          message: 'Invalid authentication token format.',
-          details: 'Token does not appear to be a valid JWT',
+          message: 'Invalid authentication token format',
         }),
         {
           status: 401,
@@ -328,8 +322,7 @@ serve(async (req) => {
       );
     }
 
-    // Create a Supabase client with anon key and user JWT for authentication
-    // The client will use the Authorization header passed in global config
+    // Create auth client with user JWT
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -338,59 +331,22 @@ serve(async (req) => {
       },
     });
     
-    // Verify the JWT token is valid with detailed error handling
-    let user;
-    let authError;
-    
-    try {
-      console.log('Verifying JWT with Supabase auth...');
-      // Call getUser() without passing JWT - it will use the Authorization header
-      const result = await supabaseAuth.auth.getUser();
-      user = result.data?.user;
-      authError = result.error;
-      
-      console.log('Auth verification result:', {
-        hasUser: !!user,
-        hasError: !!authError,
-        errorMessage: authError?.message,
-        errorStatus: authError?.status,
-        userId: user?.id
-      });
-    } catch (err) {
-      const STACK_TRACE_LIMIT = 200;
-      console.error('Exception during auth verification:', err);
-      console.error('Exception details:', {
-        name: err?.name,
-        message: err?.message,
-        stack: err?.stack?.substring(0, STACK_TRACE_LIMIT)
-      });
-      authError = { message: 'Auth verification exception', details: err };
-    }
+    // Verify user
+    console.log('[Auth] Verifying user...');
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
     
     if (authError || !user) {
-      // Log detailed error server-side only
-      console.error('Authentication failed:', authError?.message || 'No user found');
-      console.error('Auth error details:', JSON.stringify(authError, null, 2));
-      console.error('=== AUTH CHECK FAILED ===');
+      console.error('[Auth] User verification failed:', authError?.message);
       
-      // Provide more specific error messages based on the error
-      let errorMessage = 'Invalid or expired authentication token. Please log in again.';
-      let errorDetails = 'Authentication verification failed. Your session may have expired.';
-      
+      let errorMessage = 'Invalid or expired authentication token';
       if (authError?.message?.toLowerCase().includes('expired')) {
-        errorMessage = 'Your session has expired. Please log in again.';
-        errorDetails = 'JWT token has expired';
-      } else if (authError?.message?.toLowerCase().includes('invalid')) {
-        errorMessage = 'Invalid authentication token. Please log in again.';
-        errorDetails = 'JWT token is invalid or malformed';
+        errorMessage = 'Session expired. Please log in again.';
       }
       
-      // Return generic error to client (don't expose auth details)
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
           message: errorMessage,
-          details: errorDetails,
         }),
         {
           status: 401,
@@ -399,26 +355,11 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Request from authenticated user: ${user.id}`);
-    console.log('=== AUTH CHECK PASSED ===');
+    console.log('[Auth] User authenticated:', user.id);
 
-    // Create a separate Supabase client with service role for privileged database operations
-    // This client is used ONLY for database operations, not for authentication
+    // Create service role client for database operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    console.log('Service role client created for database operations');
-
-    // Get Paystack secret key
-    const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
-    if (!paystackSecret) {
-      console.error('PAYSTACK_SECRET_KEY not configured');
-      return new Response(
-        JSON.stringify({ error: 'Server configuration error' }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
+    console.log('[Database] Service role client created');
 
     // Parse request body
     const body: VerifyPaymentRequest = await req.json();
@@ -434,19 +375,14 @@ serve(async (req) => {
       );
     }
 
-    console.log('===== PAYMENT VERIFICATION START =====');
-    console.log('Reference:', reference);
-    console.log('Timestamp:', new Date().toISOString());
+    console.log('[Verification] Reference:', reference);
 
     // Step 1: Verify with Paystack
     let verificationResponse: PaystackVerificationResponse;
     try {
       verificationResponse = await verifyWithPaystack(reference, paystackSecret);
     } catch (error) {
-      console.error('Paystack verification failed:', error);
-      console.error('Error type:', error.constructor.name);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
+      console.error('[Verification] Paystack verification failed:', error.message);
       
       return new Response(
         JSON.stringify({
@@ -456,7 +392,6 @@ serve(async (req) => {
           amount: 0,
           message: 'Payment verification failed with Paystack',
           error: 'Payment verification failed',
-          details: error.message,
         }),
         {
           status: 400,
@@ -466,7 +401,7 @@ serve(async (req) => {
     }
 
     if (!verificationResponse.status || !verificationResponse.data) {
-      console.error('Invalid Paystack response:', JSON.stringify(verificationResponse));
+      console.error('[Verification] Invalid Paystack response');
       return new Response(
         JSON.stringify({
           success: false,
@@ -483,36 +418,15 @@ serve(async (req) => {
       );
     }
 
-    console.log('Paystack verification successful');
-    console.log('Payment status:', verificationResponse.data.status);
-    console.log('Payment amount:', verificationResponse.data.amount);
+    console.log('[Verification] Paystack verification successful');
+    console.log('[Verification] Payment status:', verificationResponse.data.status);
 
-    // Step 2: Store payment record (MANDATORY per spec)
-    console.log('Storing payment record...');
+    // Step 2: Store payment record
+    console.log('[Verification] Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
-    console.log('Store result:', storeResult);
-    
-    // Verify the payment was actually updated in the database
-    if (storeResult.success) {
-      const { data: verifiedPayment, error: verifyError } = await supabase
-        .from('payments')
-        .select('id, reference, status, verified')
-        .eq('reference', verificationResponse.data.reference)
-        .maybeSingle();
-      
-      if (!verifyError && verifiedPayment) {
-        console.log('Payment record in database after storage:', {
-          reference: verifiedPayment.reference,
-          status: verifiedPayment.status,
-          verified: verifiedPayment.verified
-        });
-      } else {
-        console.error('Failed to verify payment record was saved:', verifyError);
-      }
-    }
     
     if (!storeResult.success) {
-      console.error('Failed to store payment record:', storeResult.message);
+      console.error('[Verification] Failed to store payment:', storeResult.message);
       return new Response(
         JSON.stringify({
           success: false,
@@ -521,13 +435,6 @@ serve(async (req) => {
           amount: verificationResponse.data.amount,
           message: storeResult.message,
           error: storeResult.message,
-          data: {
-            reference: verificationResponse.data.reference,
-            amount: verificationResponse.data.amount,
-            currency: verificationResponse.data.currency,
-            channel: verificationResponse.data.channel,
-            paid_at: verificationResponse.data.paid_at,
-          },
         }),
         {
           status: 500,
@@ -536,34 +443,22 @@ serve(async (req) => {
       );
     }
 
-    // Step 3: Execute business logic immediately after successful payment verification
-    // This is the PRIMARY payment processing path - users are activated here synchronously
+    // Step 3: Execute business logic for successful payments
     let businessLogicResult: { success: boolean; message: string; position?: number } | null = null;
     
     if (verificationResponse.data.status === 'success') {
-      console.log('Payment successful - executing business logic...');
+      console.log('[Business Logic] Payment successful, executing business logic...');
       const paymentType = verificationResponse.data.metadata?.type;
       
-      console.log('Payment type from metadata:', paymentType);
+      console.log('[Business Logic] Payment type:', paymentType);
       
       try {
         if (paymentType === 'group_creation') {
           businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
         } else if (paymentType === 'group_join') {
           businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
-        } else if (paymentType === 'contribution' || paymentType === 'security_deposit') {
-          // These legacy payment types are for standalone contributions and deposits
-          // They don't have immediate processing requirements and are handled by webhook
-          // Modern flow uses 'group_creation' and 'group_join' types instead
-          console.log(`Legacy payment type '${paymentType}' will be processed by webhook`);
-          businessLogicResult = { 
-            success: true, 
-            message: 'Payment verified. Business logic will be processed by webhook.' 
-          };
         } else {
-          console.warn('Unknown payment type:', paymentType);
-          console.warn('Full metadata:', verificationResponse.data.metadata);
-          // Don't fail verification for unknown types - webhook will handle it
+          console.warn('[Business Logic] Unknown payment type:', paymentType);
           businessLogicResult = { 
             success: true, 
             message: 'Payment verified. Type-specific processing will be handled by webhook.' 
@@ -571,9 +466,7 @@ serve(async (req) => {
         }
 
         if (businessLogicResult?.success === false) {
-          console.error('Business logic processing failed:', businessLogicResult.message);
-          // Payment is verified but business logic failed
-          // Return error but don't fail the verification itself
+          console.error('[Business Logic] Processing failed:', businessLogicResult.message);
           return new Response(
             JSON.stringify({
               success: false,
@@ -582,13 +475,6 @@ serve(async (req) => {
               amount: verificationResponse.data.amount,
               message: `Payment verified but failed to process: ${businessLogicResult.message}`,
               error: businessLogicResult.message,
-              data: {
-                reference: verificationResponse.data.reference,
-                amount: verificationResponse.data.amount,
-                currency: verificationResponse.data.currency,
-                channel: verificationResponse.data.channel,
-                paid_at: verificationResponse.data.paid_at,
-              },
             }),
             {
               status: 400,
@@ -597,10 +483,7 @@ serve(async (req) => {
           );
         }
       } catch (error) {
-        console.error('Business logic execution error:', error);
-        console.error('Error type:', error.constructor.name);
-        console.error('Error message:', error.message);
-        // Payment is verified but business logic had an exception
+        console.error('[Business Logic] Exception:', error.message);
         return new Response(
           JSON.stringify({
             success: false,
@@ -609,13 +492,6 @@ serve(async (req) => {
             amount: verificationResponse.data.amount,
             message: 'Payment verified but encountered an error during processing. Webhook will retry.',
             error: error.message || 'Business logic execution failed',
-            data: {
-              reference: verificationResponse.data.reference,
-              amount: verificationResponse.data.amount,
-              currency: verificationResponse.data.currency,
-              channel: verificationResponse.data.channel,
-              paid_at: verificationResponse.data.paid_at,
-            },
           }),
           {
             status: 500,
@@ -624,51 +500,17 @@ serve(async (req) => {
         );
       }
       
-      console.log('Business logic executed:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
-      
-      // CRITICAL FIX: Explicitly ensure payment status is 'success' after business logic completes
-      // This is a final safety check to guarantee the payment record reflects the successful state.
-      // NOTE: This is intentionally redundant with storePaymentRecord() to ensure reliability.
-      // The initial storage may fail silently in edge cases (RLS issues, race conditions, etc.),
-      // so this final update after business logic success acts as a safety net.
-      if (businessLogicResult?.success) {
-        console.log('Ensuring payment status is set to success in database...');
-        const { error: finalUpdateError } = await supabase
-          .from('payments')
-          .update({ 
-            status: 'success',
-            verified: true,
-            updated_at: new Date().toISOString()
-          })
-          .eq('reference', verificationResponse.data.reference);
-        
-        if (finalUpdateError) {
-          console.error('WARNING: Failed to update payment status to success:', finalUpdateError);
-          // Don't fail the entire operation, but log this for investigation
-        } else {
-          console.log('Payment status confirmed as success in database');
-          
-          // Double-check the update worked
-          const { data: finalCheck } = await supabase
-            .from('payments')
-            .select('status, verified')
-            .eq('reference', verificationResponse.data.reference)
-            .maybeSingle();
-          
-          console.log('Final payment status check:', finalCheck);
-        }
-      }
+      console.log('[Business Logic] Execution complete:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
     }
 
-    console.log('Payment verified and processed successfully');
-    console.log('===== PAYMENT VERIFICATION END =====');
+    console.log('[Verification] Payment verified and processed successfully');
+    console.log('=== PAYMENT VERIFICATION END ===');
 
-    // Determine overall success: payment verified AND business logic succeeded (or not required)
+    // Return success response
     const paymentVerified = verificationResponse.data.status === 'success';
     const businessLogicSucceeded = businessLogicResult === null || businessLogicResult.success === true;
     const overallSuccess = paymentVerified && businessLogicSucceeded;
 
-    // Return verification result with business logic status
     return new Response(
       JSON.stringify({
         success: overallSuccess,
@@ -678,7 +520,7 @@ serve(async (req) => {
         message: businessLogicResult?.message || (paymentVerified 
           ? 'Payment verified and processed successfully' 
           : 'Payment verification completed'),
-        position: businessLogicResult?.position, // Include position for group payments
+        position: businessLogicResult?.position,
         data: {
           reference: verificationResponse.data.reference,
           amount: verificationResponse.data.amount,
@@ -693,11 +535,9 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('===== VERIFICATION ERROR =====');
-    console.error('Error type:', error.constructor.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('===== END ERROR =====');
+    console.error('=== VERIFICATION ERROR ===');
+    console.error('Error:', error.message);
+    console.error('=== END ERROR ===');
     
     return new Response(
       JSON.stringify({
@@ -707,7 +547,6 @@ serve(async (req) => {
         amount: 0,
         message: 'Internal server error during verification',
         error: 'Internal server error',
-        details: error.message,
       }),
       {
         status: 500,

@@ -1,27 +1,3 @@
-/**
- * Payment Success Page - Clean Implementation
- * 
- * This page handles the payment callback from Paystack.
- * 
- * Responsibilities:
- * ✅ Receive payment reference from Paystack callback
- * ✅ Call backend verify-payment Edge Function
- * ✅ Display verification result from backend
- * 
- * NOT responsible for:
- * ❌ Determining if payment was successful (backend only)
- * ❌ Updating database or business logic (backend only)
- * ❌ Polling or waiting for payment state (backend handles synchronously)
- * 
- * Flow:
- * 1. User completes payment on Paystack
- * 2. Paystack redirects to this page with reference in URL
- * 3. Page calls verifyPayment() which invokes backend Edge Function
- * 4. Backend verifies with Paystack, updates DB, executes business logic
- * 5. Page displays result from backend
- * 6. User navigates to group/dashboard
- */
-
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,21 +5,35 @@ import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { verifyPayment } from '@/api/payments';
+import { getGroupMembers, getGroupById } from '@/api';
 import { toast } from 'sonner';
 
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
 
+// Constants
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
 
+/**
+ * PaymentSuccessPage - Callback URL page for payment redirects
+ * 
+ * This page is ONLY responsible for:
+ * 1. Receiving the payment callback from Paystack
+ * 2. Calling the backend verify-payment Edge Function
+ * 3. Displaying the verification result
+ * 
+ * Business logic is executed synchronously in the verify-payment Edge Function,
+ * so activation happens immediately - no polling needed.
+ */
 export default function PaymentSuccessPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
+  const [isRefetchingData, setIsRefetchingData] = useState(false);
   
-  // Get payment reference from URL
-  // Paystack may send either 'reference' or 'trxref'
+  // Get payment reference and group ID from URL query params
+  // Paystack may send either 'reference' or 'trxref' depending on callback configuration
   const reference = searchParams.get('reference') || searchParams.get('trxref');
   const groupId = searchParams.get('group');
 
@@ -55,64 +45,92 @@ export default function PaymentSuccessPage() {
     }
 
     setVerificationStatus('verifying');
-    setVerificationMessage(DEFAULT_VERIFYING_MESSAGE);
     
-    console.log('[Payment Success] Verifying payment:', reference);
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.log('Verifying payment with reference:', reference);
+    }
 
     try {
       // Call backend verify-payment Edge Function
-      // This verifies with Paystack, stores payment, AND executes business logic
+      // This verifies with Paystack, stores payment, AND executes business logic immediately
       const result = await verifyPayment(reference);
       
-      console.log('[Payment Success] Verification result:', {
-        success: result.success,
-        verified: result.verified,
-        status: result.payment_status,
-      });
-      
       if (result.verified && result.success) {
-        // Payment verified AND business logic completed
+        // Payment verified AND business logic completed successfully
         setVerificationStatus('verified');
-        setVerificationMessage(
-          result.message || 'Payment verified successfully! Your membership is now active.'
-        );
+        setVerificationMessage(result.message || 'Payment verified successfully!');
         setMemberPosition(result.position || null);
-        toast.success('Payment verified! Your membership is active.');
+        toast.success('Payment verified! Your membership is now active.');
+        
+        // CRITICAL: After successful verification, explicitly refetch membership data
+        // to ensure the database has been updated and we have the latest state.
+        // This warms the cache so that when user navigates to GroupDetailPage,
+        // the fresh data is immediately available without additional loading.
+        if (groupId) {
+          if (import.meta.env.DEV) {
+            console.log('Refetching membership data after successful verification...');
+          }
+          setIsRefetchingData(true);
+          
+          try {
+            // Refetch group details and members to ensure database consistency
+            // The results are cached by Supabase client for immediate use on navigation
+            await Promise.all([
+              getGroupById(groupId),
+              getGroupMembers(groupId)
+            ]);
+            
+            if (import.meta.env.DEV) {
+              console.log('Membership data refetched and cached successfully');
+            }
+          } catch (refetchError) {
+            if (import.meta.env.DEV) {
+              console.error('Error refetching membership data:', refetchError);
+            }
+            // Don't fail the verification if refetch fails - data will be loaded on navigation
+          } finally {
+            setIsRefetchingData(false);
+          }
+        }
       } else {
-        // Verification failed or pending
+        // Check if the error is due to session expiration
         if (result.payment_status === 'unauthorized') {
           setVerificationStatus('failed');
           setVerificationMessage(
-            'Session expired. Please refresh the page to retry verification. Your payment was received.'
+            'Session expired during verification. Your payment was received. Please refresh this page to retry verification.'
           );
-          toast.error('Session expired. Please refresh to retry.');
+          toast.error('Session expired. Please refresh the page to retry verification.');
         } else {
           setVerificationStatus('failed');
-          setVerificationMessage(
-            result.message || result.error || 'Payment verification failed'
-          );
+          setVerificationMessage(result.message || result.error || 'Payment verification failed');
           toast.error(result.message || 'Payment verification failed');
         }
       }
     } catch (error) {
-      console.error('[Payment Success] Verification error:', error);
+      if (import.meta.env.DEV) {
+        console.error('Verification error:', error);
+      }
       setVerificationStatus('failed');
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
   }, [reference, groupId]);
 
+
   useEffect(() => {
-    // Auto-verify when reference is available
+    // Auto-verify payment if reference is provided
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
   }, [reference, verificationStatus, handleVerifyPayment]);
 
   const handleNavigation = () => {
-    // Navigate to group page if group ID provided, otherwise dashboard
+    // Navigate to group page if group ID is provided, otherwise to dashboard
     if (groupId) {
-      navigate(`/groups/${groupId}`);
+      // Add a reload query parameter to signal GroupDetailPage to refresh its data
+      // This ensures the UI reflects the updated membership status
+      navigate(`/groups/${groupId}?reload=true`);
     } else {
       navigate('/dashboard');
     }
@@ -142,7 +160,7 @@ export default function PaymentSuccessPage() {
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-4">
           {/* Status Icon */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || isRefetchingData) && (
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
           )}
           {verificationStatus === 'verified' && (
@@ -162,11 +180,13 @@ export default function PaymentSuccessPage() {
             </p>
           )}
           {verificationStatus === 'verified' && (
-            <p className="text-sm text-muted-foreground text-center">
-              {memberPosition 
-                ? `Your transaction has been verified and you have been added to the group at position ${memberPosition}.`
-                : verificationMessage || 'Your transaction has been verified and processed successfully.'}
-            </p>
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                {memberPosition 
+                  ? `Thank you! Your transaction has been verified and you have been added to the group at position ${memberPosition}.`
+                  : verificationMessage || 'Thank you! Your transaction has been verified and processed successfully.'}
+              </p>
+            </>
           )}
           {verificationStatus === 'failed' && (
             <Alert variant="destructive">
@@ -178,7 +198,7 @@ export default function PaymentSuccessPage() {
           )}
           {verificationStatus === 'idle' && (
             <p className="text-sm text-muted-foreground text-center">
-              Your payment is being processed...
+              Thank you for your payment! Your transaction is being processed.
             </p>
           )}
 
