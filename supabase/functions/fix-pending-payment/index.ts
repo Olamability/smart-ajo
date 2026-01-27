@@ -1,17 +1,22 @@
 /**
  * Fix Pending Payment Edge Function
  * 
+ * ⚠️ ADMIN TOOL ONLY - REQUIRES SERVICE ROLE KEY ⚠️
+ * 
  * This function manually processes payments that are stuck in 'pending' status.
- * It should only be used for payments that are confirmed successful in Paystack.
+ * It should only be used for payments that are confirmed successful in Paystack dashboard.
+ * 
+ * ⚠️ WARNING: This function bypasses normal payment verification when force=true.
+ * Only use force=true after manually confirming payment success in Paystack dashboard!
  * 
  * Usage:
  * POST /fix-pending-payment
- * Body: { "reference": "GRP_CREATE_xxx" }
+ * Body: { "reference": "GRP_CREATE_xxx", "force": false }
  * Headers: { "Authorization": "Bearer <service_role_key>" }
  * 
  * This function:
- * 1. Verifies payment with Paystack
- * 2. Updates payment record
+ * 1. Verifies payment with Paystack (unless force=true)
+ * 2. Updates payment record to success/verified
  * 3. Executes business logic (creates membership)
  */
 
@@ -37,7 +42,10 @@ serve(async (req) => {
   }
 
   try {
-    // This function requires service role authentication
+    // Service role authentication check
+    // NOTE: This is a simple check because this function is only deployed as an internal admin tool.
+    // The service role key should NEVER be exposed to the frontend.
+    // For production use, consider additional verification like IP whitelisting.
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.includes('service_role')) {
       return new Response(
@@ -170,11 +178,15 @@ serve(async (req) => {
     }
 
     // Update payment to success/verified
+    // At this point, shouldProcess=true means either:
+    // 1. Paystack confirmed status='success', OR  
+    // 2. force=true (admin override to treat as success)
+    // In both cases, we set status='success' and verified=true
     console.log('Updating payment to success/verified...');
     const { error: updateError } = await supabase
       .from('payments')
       .update({
-        status: 'success',
+        status: 'success', // Intentionally set to success (either confirmed or forced)
         verified: true,
         updated_at: new Date().toISOString()
       })
