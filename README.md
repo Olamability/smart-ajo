@@ -67,6 +67,7 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 
 ### Architecture & Backend
 - **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
+- **[Edge Functions Deployment Index](./EDGE_FUNCTIONS_DEPLOYMENT_INDEX.md)** - **📖 Complete guide to deploying edge functions (START HERE!)**
 - **[Payment Processor Deployment](./PAYMENT_PROCESSOR_DEPLOYMENT.md)** - **🚀 How to deploy the payment-processor.ts edge function**
 - **[Edge Functions Setup Guide](./EDGE_FUNCTIONS_SETUP.md)** - Complete edge functions deployment guide
 - **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - Fix CORS errors with Edge Functions
@@ -180,6 +181,11 @@ pass access control check: It does not have HTTP ok status.
 3. Test deployment: `./check-edge-functions.sh`
 
 **See [PAYMENT_CORS_FIX_COMPLETE.md](./PAYMENT_CORS_FIX_COMPLETE.md) for the complete fix guide with detailed steps, testing, and troubleshooting.**
+
+**For deploying the payment processor specifically, see:**
+- **[First Time Deployment Guide](./FIRST_TIME_DEPLOYMENT_GUIDE.md)** - Step-by-step walkthrough for first-time deployment
+- **[Payment Processor Deployment](./PAYMENT_PROCESSOR_DEPLOYMENT.md)** - Comprehensive deployment guide
+- **[Quick Start Guide](./DEPLOY_PAYMENT_PROCESSOR_QUICKSTART.md)** - Quick reference for deployment
 
 ### Page Refresh Returns 404
 
