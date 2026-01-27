@@ -105,23 +105,16 @@ export default function ContributionsList({
         },
       };
 
-      // Create and trigger Paystack button programmatically
-      const paystackBtn = document.createElement('button');
-      paystackBtn.className = 'paystack-button-hidden';
-      paystackBtn.setAttribute('data-paystack-config', JSON.stringify(config));
-      document.body.appendChild(paystackBtn);
+      // Initialize Paystack and open payment modal
+      const PaystackPop = (window as { PaystackPop?: { setup: (config: any) => { openIframe: () => void } } }).PaystackPop;
       
-      // Initialize Paystack
-      const handler = (window as any).PaystackPop?.setup(config);
-      if (handler) {
+      if (PaystackPop) {
+        const handler = PaystackPop.setup(config);
         handler.openIframe();
       } else {
-        // Fallback to button click
-        paystackBtn.click();
+        toast.error('Payment system not loaded. Please refresh the page.');
+        setProcessingPayment(null);
       }
-      
-      // Cleanup
-      setTimeout(() => paystackBtn.remove(), 1000);
       
     } catch (error) {
       console.error('Payment error:', error);

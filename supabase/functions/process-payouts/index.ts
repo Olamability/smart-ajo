@@ -221,7 +221,7 @@ async function processPayout(
   }
 
   // Create transaction record
-  await supabase.from('transactions').insert({
+  const { error: txError } = await supabase.from('transactions').insert({
     user_id: payout.recipient_id,
     group_id: payout.group_id,
     type: 'payout',
@@ -232,8 +232,13 @@ async function processPayout(
     completed_at: new Date().toISOString(),
   });
 
+  if (txError) {
+    console.error('[Process Payout] Failed to create transaction:', txError);
+    // Non-fatal: payout is already marked complete, but log for monitoring
+  }
+
   // Create notification
-  await supabase.from('notifications').insert({
+  const { error: notifError } = await supabase.from('notifications').insert({
     user_id: payout.recipient_id,
     type: 'payout_completed',
     title: 'Payout Sent!',
@@ -246,6 +251,11 @@ async function processPayout(
       reference: reference,
     },
   });
+
+  if (notifError) {
+    console.error('[Process Payout] Failed to create notification:', notifError);
+    // Non-fatal: payout is complete, but user won't get notification
+  }
 
   console.log('[Process Payout] Completed:', payout.payout_id);
 

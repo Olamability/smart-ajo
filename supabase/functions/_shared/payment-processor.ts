@@ -587,7 +587,7 @@ export async function processContributionPayment(
   }
 
   // Create notification for user
-  await supabase
+  const { error: notifError } = await supabase
     .from('notifications')
     .insert({
       user_id: userId,
@@ -601,6 +601,11 @@ export async function processContributionPayment(
         cycle_number: contribution.cycle_number,
       },
     });
+
+  if (notifError) {
+    console.error('[Payment Processor] Failed to create notification:', notifError);
+    // Non-fatal: contribution is already paid
+  }
 
   console.log('[Payment Processor] Contribution payment processed successfully');
   return {
