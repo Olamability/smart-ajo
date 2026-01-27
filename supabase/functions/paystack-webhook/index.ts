@@ -29,6 +29,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   processGroupCreationPayment,
   processGroupJoinPayment,
+  processContributionPayment,
 } from "../_shared/payment-processor.ts";
 
 // ============================================================================
@@ -316,6 +317,8 @@ serve(async (req) => {
           result = await processGroupCreationPayment(supabase, event.data);
         } else if (paymentType === 'group_join') {
           result = await processGroupJoinPayment(supabase, event.data);
+        } else if (paymentType === 'contribution') {
+          result = await processContributionPayment(supabase, event.data);
         } else {
           console.warn('[Webhook] Unknown payment type:', paymentType);
           result = { 

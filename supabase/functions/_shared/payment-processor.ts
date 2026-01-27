@@ -484,3 +484,127 @@ export async function processGroupJoinPayment(
     position: memberPosition,
   };
 }
+
+/**
+ * Process standalone contribution payment
+ * Updates contribution status to paid and creates transaction record
+ * 
+ * Idempotent: Safe to call multiple times
+ */
+export async function processContributionPayment(
+  supabase: SupabaseClient,
+  paymentData: {
+    reference: string;
+    amount: number;
+    status: string;
+    metadata?: {
+      user_id?: string;
+      group_id?: string;
+      contribution_id?: string;
+    };
+  }
+): Promise<{ success: boolean; message: string }> {
+  const { reference, amount, metadata, status } = paymentData;
+
+  console.log('[Payment Processor] Processing contribution payment');
+  console.log('[Payment Processor] Reference:', reference);
+  console.log('[Payment Processor] Status:', status);
+
+  if (status !== 'success') {
+    console.error('[Payment Processor] Invalid payment status:', status);
+    return { success: false, message: 'Payment not successful' };
+  }
+
+  const contributionId = metadata?.contribution_id;
+  const userId = metadata?.user_id;
+  const groupId = metadata?.group_id;
+
+  if (!contributionId || !userId || !groupId) {
+    console.error('[Payment Processor] Missing required metadata');
+    return { success: false, message: 'Invalid payment metadata' };
+  }
+
+  // Get contribution details
+  const { data: contribution, error: fetchError } = await supabase
+    .from('contributions')
+    .select('id, user_id, group_id, status, amount, cycle_number')
+    .eq('id', contributionId)
+    .maybeSingle();
+
+  if (fetchError || !contribution) {
+    console.error('[Payment Processor] Contribution not found:', fetchError);
+    return { success: false, message: 'Contribution not found' };
+  }
+
+  // Verify contribution belongs to user
+  if (contribution.user_id !== userId) {
+    console.error('[Payment Processor] Contribution user mismatch');
+    return { success: false, message: 'Unauthorized: contribution belongs to different user' };
+  }
+
+  // Check if already paid (idempotency)
+  if (contribution.status === 'paid') {
+    console.log('[Payment Processor] Contribution already paid (idempotent)');
+    return { 
+      success: true, 
+      message: 'Contribution already processed' 
+    };
+  }
+
+  // Update contribution to paid
+  const { error: updateError } = await supabase
+    .from('contributions')
+    .update({
+      status: 'paid',
+      paid_date: new Date().toISOString(),
+      transaction_ref: reference,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', contributionId);
+
+  if (updateError) {
+    console.error('[Payment Processor] Failed to update contribution:', updateError);
+    return { success: false, message: 'Failed to update contribution status' };
+  }
+
+  // Create transaction record
+  const { error: txError } = await supabase
+    .from('transactions')
+    .insert({
+      user_id: userId,
+      group_id: groupId,
+      type: 'contribution',
+      amount: contribution.amount,
+      status: 'completed',
+      reference: reference,
+      description: `Contribution payment for cycle ${contribution.cycle_number}`,
+      completed_at: new Date().toISOString(),
+    });
+
+  if (txError) {
+    console.error('[Payment Processor] Failed to create transaction:', txError);
+    // Non-fatal - contribution is already marked as paid
+  }
+
+  // Create notification for user
+  await supabase
+    .from('notifications')
+    .insert({
+      user_id: userId,
+      type: 'contribution_paid',
+      title: 'Contribution Payment Successful',
+      message: `Your contribution payment of ₦${(contribution.amount).toLocaleString()} has been processed successfully.`,
+      data: {
+        contribution_id: contributionId,
+        group_id: groupId,
+        amount: contribution.amount,
+        cycle_number: contribution.cycle_number,
+      },
+    });
+
+  console.log('[Payment Processor] Contribution payment processed successfully');
+  return {
+    success: true,
+    message: 'Contribution payment processed successfully',
+  };
+}

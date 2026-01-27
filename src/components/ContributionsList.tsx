@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getGroupContributions } from '@/api';
+import { getGroupContributions, initializeContributionPayment } from '@/api';
 import type { Contribution } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { DollarSign, Calendar, Loader2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { PaystackButton } from 'react-paystack';
 
 interface ContributionsListProps {
   groupId: string;
@@ -64,28 +65,70 @@ export default function ContributionsList({
   const handlePayContribution = async (contribution: Contribution) => {
     if (!user) return;
 
-    // TODO: Implement standalone contribution payment flow
-    // This requires:
-    // 1. Create payment initialization function in payments.ts
-    // 2. Backend Edge Function to process contribution payments
-    // 3. Update this to use new payment flow
     setProcessingPayment(contribution.id);
-    toast.info('Standalone contribution payments coming soon. Use group join flow for now.');
-    setProcessingPayment(null);
     
-    /*
     try {
-      // New implementation will follow this pattern:
-      // 1. Initialize payment record in database
-      // 2. Open Paystack modal with reference
-      // 3. Redirect to payment success page for verification
-      // 4. Backend verifies and processes
+      // Initialize payment record in database
+      const result = await initializeContributionPayment(
+        contribution.id,
+        groupId,
+        contribution.amount
+      );
+      
+      if (!result.success || !result.reference) {
+        toast.error(result.error || 'Failed to initialize payment');
+        setProcessingPayment(null);
+        return;
+      }
+
+      // Get Paystack public key from environment
+      const paystackKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
+      
+      if (!paystackKey) {
+        toast.error('Payment configuration error. Please contact support.');
+        setProcessingPayment(null);
+        return;
+      }
+
+      // Prepare Paystack config
+      const config = {
+        reference: result.reference,
+        email: user.email || '',
+        amount: Math.round(contribution.amount * 100), // Convert to kobo
+        publicKey: paystackKey,
+        onSuccess: () => {
+          // Redirect to payment success page for verification
+          window.location.href = `/payment-success?reference=${result.reference}&type=contribution`;
+        },
+        onClose: () => {
+          toast.info('Payment cancelled');
+          setProcessingPayment(null);
+        },
+      };
+
+      // Create and trigger Paystack button programmatically
+      const paystackBtn = document.createElement('button');
+      paystackBtn.className = 'paystack-button-hidden';
+      paystackBtn.setAttribute('data-paystack-config', JSON.stringify(config));
+      document.body.appendChild(paystackBtn);
+      
+      // Initialize Paystack
+      const handler = (window as any).PaystackPop?.setup(config);
+      if (handler) {
+        handler.openIframe();
+      } else {
+        // Fallback to button click
+        paystackBtn.click();
+      }
+      
+      // Cleanup
+      setTimeout(() => paystackBtn.remove(), 1000);
+      
     } catch (error) {
       console.error('Payment error:', error);
       toast.error('Failed to initialize payment');
       setProcessingPayment(null);
     }
-    */
   };
 
   const getStatusColor = (status: string) => {

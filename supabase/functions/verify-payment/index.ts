@@ -28,6 +28,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   processGroupCreationPayment,
   processGroupJoinPayment,
+  processContributionPayment,
 } from "../_shared/payment-processor.ts";
 
 // ============================================================================
@@ -457,6 +458,8 @@ serve(async (req) => {
           businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
         } else if (paymentType === 'group_join') {
           businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
+        } else if (paymentType === 'contribution') {
+          businessLogicResult = await processContributionPayment(supabase, verificationResponse.data);
         } else {
           console.warn('[Business Logic] Unknown payment type:', paymentType);
           businessLogicResult = { 
