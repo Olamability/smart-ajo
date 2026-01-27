@@ -12,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Shield, Plus, Users, DollarSign, Calendar, Loader2 } from 'lucide-react';
+import { Shield, Plus, Users, DollarSign, Calendar, Loader2, CreditCard, AlertCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 
 export default function GroupsPage() {
@@ -70,6 +71,35 @@ export default function GroupsPage() {
     }
   };
 
+  // Check if user needs to make payment for a group
+  const needsPayment = (group: ApiGroup): boolean => {
+    if (!user || group.status !== 'forming') return false;
+    
+    // Check if user is a member who hasn't paid security deposit
+    const currentUserMember = group.members?.find(m => m.userId === user.id);
+    
+    // If user is a member, check if they've paid
+    if (currentUserMember) {
+      return !currentUserMember.securityDepositPaid;
+    }
+    
+    // If user is the creator but not yet in members array, they need to pay
+    const isCreator = group.createdBy === user.id;
+    if (isCreator) {
+      return true; // Creator needs to pay to become a member
+    }
+    
+    return false;
+  };
+
+  const handlePaymentClick = (e: React.MouseEvent, groupId: string) => {
+    e.stopPropagation(); // Prevent card click navigation
+    navigate(`/groups/${groupId}#payment`);
+  };
+
+  // Memoize groups that need payment to avoid repeated filtering
+  const groupsNeedingPayment = groups.filter(needsPayment);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -119,6 +149,38 @@ export default function GroupsPage() {
           </Button>
         </div>
 
+        {/* Pending Payments Alert - Show groups requiring payment */}
+        {groupsNeedingPayment.length > 0 && (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-6 h-6 text-orange-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-orange-900 mb-1">
+                    Payment Required
+                  </h3>
+                  <p className="text-sm text-orange-700 mb-3">
+                    You have {groupsNeedingPayment.length} {groupsNeedingPayment.length === 1 ? 'group' : 'groups'} waiting for payment. 
+                    Complete your security deposit to activate your membership.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {groupsNeedingPayment.map((group) => (
+                      <Badge
+                        key={group.id}
+                        variant="outline"
+                        className="cursor-pointer bg-white hover:bg-orange-100 border-orange-300"
+                        onClick={() => navigate(`/groups/${group.id}`)}
+                      >
+                        {group.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Groups List */}
         {groups.length === 0 ? (
           <Card>
@@ -161,6 +223,29 @@ export default function GroupsPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2 sm:space-y-3">
+                    {/* Payment Alert - Show if user needs to pay */}
+                    {needsPayment(group) && (
+                      <div className="mb-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-orange-900 mb-1">Payment Required</p>
+                            <p className="text-xs text-orange-700 mb-2">
+                              Complete your security deposit to activate membership
+                            </p>
+                            <Button
+                              size="sm"
+                              onClick={(e) => handlePaymentClick(e, group.id)}
+                              className="w-full gap-2"
+                            >
+                              <CreditCard className="w-3 h-3" />
+                              Pay Now - {formatCurrency(group.securityDepositAmount + group.contributionAmount)}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
                     <div className="flex items-center justify-between text-xs sm:text-sm">
                       <span className="flex items-center gap-2 text-muted-foreground">
                         <DollarSign className="w-3 h-3 sm:w-4 sm:h-4" />
