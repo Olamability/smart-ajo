@@ -2,6 +2,18 @@
 
 A modern web application for managing rotating savings groups (Ajo/Esusu) with complete transparency, automated escrow, enforced contributions, and guaranteed payouts.
 
+## ⚡ Payment Integration Status
+
+**✅ FULLY IMPLEMENTED** - Payment system is production-ready and complete.
+**❌ NEEDS DEPLOYMENT** - Edge Functions must be deployed for payments to work.
+
+**Quick Fix (5 minutes):**
+```bash
+./deploy-payment-system.sh
+```
+
+See [PAYMENT_INTEGRATION_README.md](./PAYMENT_INTEGRATION_README.md) for complete payment setup guide.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -60,7 +72,9 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 - **[Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)** - **Step-by-step guide for deploying to Vercel**
 - **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Production deployment instructions
 
-### Payment Integration
+### Payment Integration ⚡
+- **[Payment Integration README](./PAYMENT_INTEGRATION_README.md)** - **🔥 Quick start guide for payment setup (START HERE!)**
+- **[Complete Deployment Guide](./PAYSTACK_INTEGRATION_DEPLOYMENT.md)** - **📖 Comprehensive payment deployment guide**
 - **[Callback URL Guide](./CALLBACK_URL_GUIDE.md)** - **📍 What are callback URLs and how to find them**
 - **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup and webhook configuration
 - **[Payment CORS Fix - COMPLETE GUIDE](./PAYMENT_CORS_FIX_COMPLETE.md)** - **🔥 Fix payment verification CORS errors**
