@@ -1751,18 +1751,28 @@ BEGIN
   
   -- Create transaction record
   INSERT INTO transactions (
+    user_id,
+    group_id,
     from_wallet_id,
     to_wallet_id,
     amount,
-    transaction_type,
+    type,
+    status,
+    payment_method,
     reference,
+    description,
     metadata
   ) VALUES (
+    v_payout.recipient_id,
+    v_payout.related_group_id,
     NULL, -- System credit
     v_recipient_wallet_id,
     v_payout.amount,
     'payout',
+    'completed',
+    'wallet_transfer',
     v_transaction_ref,
+    'Cycle payout to wallet',
     jsonb_build_object(
       'payout_id', v_payout.id,
       'group_id', v_payout.related_group_id,
@@ -1852,18 +1862,26 @@ BEGIN
   
   -- Create transaction record
   INSERT INTO transactions (
+    user_id,
     from_wallet_id,
     to_wallet_id,
     amount,
-    transaction_type,
+    type,
+    status,
+    payment_method,
     reference,
+    description,
     metadata
   ) VALUES (
+    p_from_user_id,
     v_from_wallet_id,
     v_to_wallet_id,
     p_amount,
     p_transaction_type,
+    'completed',
+    'wallet_transfer',
     p_reference,
+    'Internal wallet transfer',
     p_metadata
   )
   RETURNING id INTO v_transaction_id;
