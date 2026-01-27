@@ -1,70 +1,258 @@
-# SMART AJO – FULL PRODUCT REQUIREMENTS DOCUMENT (PRD)
+User Roles
+1. Platform
 
-## Product Name
-Smart Ajo (Working Name)
+Acts as neutral organizer
 
----
+Holds all funds in escrow
 
-## Problem
-Traditional ajo systems fail due to lack of enforcement, transparency, and trust, leading to defaults, delayed payouts, and social conflicts among members.
+Enforces rules automatically
 
----
+Executes payouts via Paystack
 
-## Solution
-An automated escrow-based ajo platform where the system acts as the organizer, holding contributions securely, enforcing mandatory security deposits, applying penalties for defaults, and automatically releasing payouts according to a predefined rotation.
+2. Group Creator (Admin)
 
----
+Creates ajo groups
 
-## Target Users
-- Salary earners
-- Traders
-- Students
-- Cooperatives
+Sets group rules
 
----
+Reviews and approves applicants
 
-## Core Features (MVP)
-1. User registration & verification (phone/email, optional KYC/BVN)
-2. Group creation with rules (contribution amount, frequency, total members, rotation order)
-3. Escrow contributions
-4. Automated payouts when all members have paid
-5. Security deposit enforcement
-6. Penalty system for late or missing payments
-7. Transaction history and dashboard for transparency
+Cannot tamper with funds or payout order once locked
 
----
+3. Group Member
 
-## Non-Goals
-- Lending
-- Investments
-- Crypto
+Applies to join groups
 
----
+Pays security deposit and contributions
 
-## Monetization
-- The system charges a **10% service fee** per contribution cycle.
+Receives payout based on assigned slot
 
----
+Detailed User Flow (MVP)
+1. User Registration & Onboarding
+Required
 
-## Success Metrics
-- Group completion rate
-- Default rate
-- Monthly active users
-- Transaction volume
+Phone number (OTP verification)
 
----
+Email
 
-## Future Enhancements
-- BVN credit scoring
-- Insurance-backed groups
-- Business/cooperative plans
-- Reduced-fee premium tiers
+Full name
 
----
+Password
 
-## Key Clarifications
-- **App-as-Organizer:** The system itself manages all payments, collections, and enforcement.
-- **Enforcement Model:** Each member pays a security deposit; contributions are held in escrow until all members pay. Defaulting members incur penalties and may lose their deposit.
+Optional (Phase 2)
 
----
+BVN
 
+Government ID
+
+2. Group Creation Flow (Admin)
+Group Setup
+
+Admin must define:
+
+Group name
+
+Contribution amount (e.g ₦50,000)
+
+Contribution frequency (daily / weekly / monthly /yearly)
+
+Number of members (e.g 10 people)
+
+Total cycles
+
+Security deposit amount
+
+Penalty rules:
+
+Late payment fee
+
+Grace period
+
+Group visibility:
+
+Public (discoverable)
+
+Private (invite-only)
+
+Slot Selection (Important)
+
+Admin selects preferred payout slot
+
+Available slots update dynamically
+
+Once selected → slot becomes locked
+
+Admin Initial Payment
+
+Before group becomes live:
+
+Admin must pay:
+
+Security deposit
+
+Contribution
+
+Payment processed via Paystack
+
+Group status becomes OPEN FOR APPLICATIONS only after payment verification
+
+3. Group Discovery & Application (Members)
+Group Browsing
+
+Users can browse groups by:
+
+Contribution amount
+
+Frequency
+
+Available slots
+
+Group status
+
+Displayed info:
+
+Admin profile
+
+Rules summary
+
+Available payout slots
+
+Security deposit amount
+
+Application to Join
+
+Applicant must:
+
+Select preferred payout slot
+
+Submit application
+
+Application includes:
+
+Full name
+
+Phone number. etc
+
+4. Admin Review & Approval
+
+Admin dashboard shows:
+
+Applicant profile
+
+Selected slot
+
+Risk indicators (future: credit score)
+
+Admin/creator actions:
+
+Accept
+
+Reject
+
+5. Member Payment & Activation
+
+After acceptance:
+
+Applicant must pay:
+
+Security deposit
+
+Required contribution(s)
+
+Payment is:
+
+Processed via Paystack
+
+Automatically verified
+
+Only after successful payment:
+
+User becomes ACTIVE MEMBER
+
+Slot becomes locked
+
+Group member count updates
+
+6. 
+Automated Enforcement
+
+Late payment:
+
+Penalty auto-deducted
+
+Default:
+
+Security deposit partially or fully forfeited
+
+Member removed if threshold reached
+
+7. Automated Payout System
+
+System releases payout automatically
+
+Admin has NO CONTROL over payout
+
+Payout goes to:
+
+Member assigned to that slot
+
+Paystack transfer API used
+
+All users get payout notifications
+
+8. Transparency & Dashboard
+For All Users
+
+Contribution history
+
+Payout history
+
+Group progress tracker
+
+Penalties applied
+
+For Admin
+
+Applications list
+
+Member status
+
+Payment compliance overview
+
+9. Fees & Monetization
+
+10% service fee per contribution cycle
+
+Auto-deducted before escrow
+
+Shown transparently in UI
+
+10. Group States (Important for Dev)
+
+Draft
+
+Open for applications
+
+Locked (all slots filled)
+
+Active
+
+Completed
+
+Defaulted (edge case)
+
+11. Paystack Integration (Core Requirement)
+
+All payments must:
+
+Use Paystack Checkout
+
+Be verified via webhook
+
+Trigger:
+
+Slot locking
+
+Group activation
+
+Payout release
