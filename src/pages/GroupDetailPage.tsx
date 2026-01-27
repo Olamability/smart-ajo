@@ -19,6 +19,7 @@ import { paystackService, PaystackResponse } from '@/lib/paystack';
 import ContributionsList from '@/components/ContributionsList';
 import PayoutSchedule from '@/components/PayoutSchedule';
 import SlotSelector from '@/components/SlotSelector';
+import PaymentBreakdown from '@/components/PaymentBreakdown';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -529,23 +530,11 @@ export default function GroupDetailPage() {
                       </p>
                     </div>
 
-                    <div className="p-4 bg-white border border-gray-200 rounded-lg">
-                      <h4 className="font-semibold text-gray-900 mb-3">Payment Breakdown</h4>
-                      <div className="flex justify-between items-center text-sm mb-2">
-                        <span className="text-gray-600">Security Deposit:</span>
-                        <span className="font-semibold">{formatCurrency(group.securityDepositAmount)}</span>
-                      </div>
-                      <div className="flex justify-between items-center text-sm mb-2">
-                        <span className="text-gray-600">First Contribution:</span>
-                        <span className="font-semibold">{formatCurrency(group.contributionAmount)}</span>
-                      </div>
-                      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
-                        <span className="font-bold text-gray-900">Total Amount:</span>
-                        <span className="font-bold text-primary">
-                          {formatCurrency(group.securityDepositAmount + group.contributionAmount)}
-                        </span>
-                      </div>
-                    </div>
+                    <PaymentBreakdown
+                      securityDepositAmount={group.securityDepositAmount}
+                      contributionAmount={group.contributionAmount}
+                      formatCurrency={formatCurrency}
+                    />
 
                     <Button
                       onClick={handlePaySecurityDeposit}
@@ -599,21 +588,12 @@ export default function GroupDetailPage() {
                   </p>
                 </div>
 
-                <div className="p-3 bg-white border border-green-200 rounded-lg">
-                  <div className="flex justify-between items-center text-sm mb-1">
-                    <span className="text-gray-600">Security Deposit:</span>
-                    <span className="font-semibold">{formatCurrency(group.securityDepositAmount)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm mb-1">
-                    <span className="text-gray-600">First Contribution:</span>
-                    <span className="font-semibold">{formatCurrency(group.contributionAmount)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm pt-2 border-t border-gray-200">
-                    <span className="font-bold text-gray-900">Total Amount:</span>
-                    <span className="font-bold text-green-700">
-                      {formatCurrency(group.securityDepositAmount + group.contributionAmount)}
-                    </span>
-                  </div>
+                <div className="border-green-200">
+                  <PaymentBreakdown
+                    securityDepositAmount={group.securityDepositAmount}
+                    contributionAmount={group.contributionAmount}
+                    formatCurrency={formatCurrency}
+                  />
                 </div>
 
                 <Button
