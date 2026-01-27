@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { DollarSign, Calendar, Loader2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { PaystackButton } from 'react-paystack';
 
 interface ContributionsListProps {
   groupId: string;

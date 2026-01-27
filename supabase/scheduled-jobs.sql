@@ -56,6 +56,41 @@ SELECT cron.schedule(
 );
 
 -- ============================================================================
+-- JOB 2b: Process Pending Payouts
+-- ============================================================================
+-- Runs every 2 hours
+-- Executes pending payouts via Paystack transfer API
+-- 
+-- NOTE: This requires the process-payouts Edge Function to be deployed
+-- Alternative: Call the Edge Function via HTTP from external cron service
+--
+-- IMPORTANT: pg_net extension must be enabled for http requests from cron
+-- Enable via: CREATE EXTENSION IF NOT EXISTS pg_net;
+-- ============================================================================
+
+-- Uncomment when pg_net extension is available:
+/*
+SELECT cron.schedule(
+  'process-pending-payouts',        -- Job name
+  '0 */2 * * *',                    -- Cron schedule (Every 2 hours)
+  $$
+    SELECT net.http_post(
+      url := CURRENT_SETTING('app.supabase_url') || '/functions/v1/process-payouts',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || CURRENT_SETTING('app.service_role_key')
+      ),
+      body := '{}'::jsonb
+    );
+  $$
+);
+*/
+
+-- Alternative: External cron service (e.g., GitHub Actions, cron-job.org)
+-- Schedule HTTP POST to: https://YOUR_PROJECT.supabase.co/functions/v1/process-payouts
+-- Headers: Authorization: Bearer YOUR_SERVICE_ROLE_KEY
+
+-- ============================================================================
 -- JOB 3: Send Payment Reminders
 -- ============================================================================
 -- Runs daily at 9:00 AM UTC (10 AM WAT for Nigerian users)

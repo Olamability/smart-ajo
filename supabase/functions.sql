@@ -1380,6 +1380,147 @@ COMMENT ON FUNCTION auto_add_creator_as_member IS
   'Automatically adds the group creator as a member when a group is created.';
 
 -- ============================================================================
+-- FUNCTION: get_pending_payouts
+-- ============================================================================
+-- Gets all pending payouts that are ready to be executed
+-- Returns payout details along with recipient bank information
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION get_pending_payouts()
+RETURNS TABLE (
+  payout_id UUID,
+  group_id UUID,
+  group_name VARCHAR,
+  recipient_id UUID,
+  recipient_name VARCHAR,
+  recipient_email VARCHAR,
+  recipient_bank_code VARCHAR,
+  recipient_account_number VARCHAR,
+  recipient_account_name VARCHAR,
+  amount DECIMAL,
+  cycle_number INTEGER,
+  created_at TIMESTAMPTZ
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    p.id AS payout_id,
+    p.related_group_id AS group_id,
+    g.name AS group_name,
+    p.recipient_id,
+    u.full_name AS recipient_name,
+    u.email AS recipient_email,
+    u.bank_code AS recipient_bank_code,
+    u.account_number AS recipient_account_number,
+    u.account_name AS recipient_account_name,
+    p.amount,
+    p.cycle_number,
+    p.created_at
+  FROM payouts p
+  JOIN groups g ON p.related_group_id = g.id
+  JOIN users u ON p.recipient_id = u.id
+  WHERE p.status = 'pending'
+    AND u.bank_code IS NOT NULL
+    AND u.account_number IS NOT NULL
+    AND u.account_name IS NOT NULL
+  ORDER BY p.created_at ASC;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION get_pending_payouts IS 
+  'Gets all pending payouts with recipient bank information for processing';
+
+-- ============================================================================
+-- FUNCTION: mark_payout_processing
+-- ============================================================================
+-- Marks a payout as processing to prevent duplicate processing
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION mark_payout_processing(p_payout_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_updated_count INTEGER;
+BEGIN
+  UPDATE payouts
+  SET status = 'processing',
+      updated_at = NOW()
+  WHERE id = p_payout_id
+    AND status = 'pending';
+  
+  GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+  
+  RETURN v_updated_count > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION mark_payout_processing IS 
+  'Marks a payout as processing (idempotent)';
+
+-- ============================================================================
+-- FUNCTION: mark_payout_completed
+-- ============================================================================
+-- Marks a payout as completed after successful transfer
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION mark_payout_completed(
+  p_payout_id UUID,
+  p_payment_reference VARCHAR,
+  p_payment_method VARCHAR DEFAULT 'bank_transfer'
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_updated_count INTEGER;
+BEGIN
+  UPDATE payouts
+  SET status = 'completed',
+      payout_date = NOW(),
+      payment_reference = p_payment_reference,
+      payment_method = p_payment_method,
+      updated_at = NOW()
+  WHERE id = p_payout_id
+    AND status = 'processing';
+  
+  GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+  
+  RETURN v_updated_count > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION mark_payout_completed IS 
+  'Marks a payout as completed with payment details';
+
+-- ============================================================================
+-- FUNCTION: mark_payout_failed
+-- ============================================================================
+-- Marks a payout as failed and resets to pending for retry
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION mark_payout_failed(
+  p_payout_id UUID,
+  p_error_message TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_updated_count INTEGER;
+BEGIN
+  UPDATE payouts
+  SET status = 'failed',
+      notes = COALESCE(notes || E'\n', '') || 
+              'Failed at ' || NOW() || ': ' || p_error_message,
+      updated_at = NOW()
+  WHERE id = p_payout_id
+    AND status = 'processing';
+  
+  GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+  
+  RETURN v_updated_count > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION mark_payout_failed IS 
+  'Marks a payout as failed with error details';
+
+-- ============================================================================
 -- END OF FUNCTIONS
 -- ============================================================================
 --
