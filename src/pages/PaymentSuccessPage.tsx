@@ -100,7 +100,7 @@ export default function PaymentSuccessPage() {
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     }
-  }, [reference]);
+  }, [reference, groupId]);
 
   useEffect(() => {
     // Auto-verify when reference is available
