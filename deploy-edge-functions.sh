@@ -27,6 +27,7 @@ FUNCTIONS=(
   "send-email"
   "verify-bvn"
   "health-check"
+  "process-payouts"
 )
 
 echo -e "${YELLOW}========================================${NC}"
