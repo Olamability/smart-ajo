@@ -67,6 +67,8 @@ A modern web application for managing rotating savings groups (Ajo/Esusu) with c
 
 ### Architecture & Backend
 - **[Architecture Guide](./ARCHITECTURE.md)** - System architecture and design decisions
+- **[Payment Processor Deployment](./PAYMENT_PROCESSOR_DEPLOYMENT.md)** - **🚀 How to deploy the payment-processor.ts edge function**
+- **[Edge Functions Setup Guide](./EDGE_FUNCTIONS_SETUP.md)** - Complete edge functions deployment guide
 - **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - Fix CORS errors with Edge Functions
 - **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
 

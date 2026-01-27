@@ -2,6 +2,16 @@
 
 This guide explains how to deploy and configure the Supabase Edge Functions for SmartAjo.
 
+## Important Note About payment-processor.ts
+
+**`payment-processor.ts` is NOT a standalone edge function** - it's a shared library module located in `supabase/functions/_shared/` that contains reusable payment processing business logic.
+
+It is automatically included when you deploy:
+- `verify-payment` - Primary payment processor  
+- `paystack-webhook` - Backup payment processor
+
+**See [PAYMENT_PROCESSOR_DEPLOYMENT.md](./PAYMENT_PROCESSOR_DEPLOYMENT.md) for detailed deployment instructions for payment-processor.ts.**
+
 ## Prerequisites
 
 - Supabase CLI installed: `npm install -g supabase`
