@@ -87,8 +87,20 @@ export default function PaymentSuccessPage() {
 
   const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
+      console.error('[Payment Success] ❌ No payment reference provided');
+      console.error('[Payment Success] URL params:', window.location.search);
       setVerificationStatus('failed');
-      setVerificationMessage('No payment reference provided');
+      setVerificationMessage('No payment reference provided. Please check your payment status or contact support.');
+      toast.error('Missing payment reference');
+      return;
+    }
+
+    // Validate reference format
+    if (reference.trim().length === 0) {
+      console.error('[Payment Success] ❌ Invalid payment reference (empty)');
+      setVerificationStatus('failed');
+      setVerificationMessage('Invalid payment reference. Please contact support.');
+      toast.error('Invalid payment reference');
       return;
     }
 

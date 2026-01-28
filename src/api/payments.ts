@@ -391,6 +391,13 @@ function isSessionExpired(session: { expires_at?: number } | null): boolean {
  * 
  * Frontend MUST NOT assume payment success based on Paystack callback alone.
  * 
+ * SECURITY: This function includes multiple layers of protection:
+ * - Validates payment reference format
+ * - Refreshes JWT token before calling backend
+ * - Retries on network/timeout errors
+ * - Does NOT retry on authentication errors (user must refresh)
+ * - Backend validates with Paystack using SECRET key
+ * 
  * @param reference - Payment reference from Paystack
  * @param retries - Number of retry attempts (default: 3)
  * @param delayMs - Delay between retries in milliseconds (default: 2000)
@@ -402,6 +409,19 @@ export async function verifyPayment(
   delayMs: number = VERIFICATION_DELAY_MS
 ): Promise<PaymentVerificationResult> {
   console.log('[Payment Verify] Starting verification for:', reference);
+  
+  // Validate reference format
+  if (!reference || typeof reference !== 'string' || reference.trim().length === 0) {
+    console.error('[Payment Verify] Invalid reference format:', reference);
+    return {
+      success: false,
+      payment_status: 'invalid_reference',
+      verified: false,
+      amount: 0,
+      message: 'Invalid payment reference',
+      error: 'Payment reference is required and must be a non-empty string',
+    };
+  }
   
   const supabase = createClient();
   
