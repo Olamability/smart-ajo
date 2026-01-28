@@ -70,8 +70,7 @@ export function isSupabaseConnectionError(error: unknown): boolean {
     message.includes('err_name_not_resolved') ||
     message.includes('could not resolve host') ||
     message.includes('connection refused') ||
-    message.includes('timeout') ||
-    (error instanceof TypeError && message.includes('fetch'))
+    message.includes('timeout')
   );
 }
 
@@ -95,7 +94,7 @@ export function enhanceSupabaseConnectionError(error: unknown, context: string =
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'not configured';
   
   const enhancedMessage = `
-🔴 Supabase Connection Error
+[SUPABASE CONNECTION ERROR]
 
 Failed while ${context}: ${originalMessage}
 
@@ -106,29 +105,37 @@ This typically means:
 2. Network connectivity issues
 3. The Supabase service is temporarily unavailable
 
-🛠️ To fix this issue:
+FIX INSTRUCTIONS:
 
 1. Verify your Supabase project exists:
-   → Go to https://supabase.com/dashboard
-   → Check if your project is active
+   -> Go to https://supabase.com/dashboard
+   -> Check if your project is active
 
 2. Update your .env.development file with the correct credentials:
-   → Get Project URL from Settings → API
-   → Update VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+   -> Get Project URL from Settings -> API
+   -> Update VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 
 3. Restart the development server:
-   → Stop the server (Ctrl+C)
-   → Run: npm run dev
+   -> Stop the server (Ctrl+C)
+   -> Run: npm run dev
 
-📖 See docs/TROUBLESHOOTING_SUPABASE_CONNECTION.md for detailed help.
+DOCUMENTATION: See docs/TROUBLESHOOTING_SUPABASE_CONNECTION.md for detailed help.
   `.trim();
 
+  // Create enhanced error with cause preserved
   const enhancedError = new Error(enhancedMessage);
   enhancedError.name = 'SupabaseConnectionError';
   
-  // Preserve original error as cause if supported
-  if ('cause' in enhancedError) {
-    (enhancedError as Error & { cause: unknown }).cause = error;
+  // Preserve original error as cause (ES2022 feature with fallback)
+  try {
+    Object.defineProperty(enhancedError, 'cause', {
+      value: error,
+      writable: false,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Ignore if property can't be defined
   }
   
   return enhancedError;

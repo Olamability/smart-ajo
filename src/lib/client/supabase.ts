@@ -20,8 +20,13 @@ function isValidSupabaseUrl(url: string): boolean {
     return false;
   }
   
-  // Check if URL contains .supabase.co domain
-  return url.includes('.supabase.co');
+  try {
+    const urlObj = new URL(url);
+    // Check if hostname ends with .supabase.co (not just contains it)
+    return urlObj.hostname.endsWith('.supabase.co');
+  } catch {
+    return false;
+  }
 }
 
 export function createClient() {
@@ -31,7 +36,7 @@ export function createClient() {
   // Check if environment variables are present
   if (!supabaseUrl || !supabaseAnonKey) {
     const errorMessage = `
-❌ Missing Supabase environment variables!
+[CONFIGURATION ERROR] Missing Supabase environment variables!
 
 Please ensure the following are set in your .env.development file:
 - VITE_SUPABASE_URL
@@ -49,7 +54,7 @@ See .env.example for a template.
   // Validate URL format
   if (!isValidUrl(supabaseUrl)) {
     const errorMessage = `
-❌ Invalid Supabase URL format!
+[CONFIGURATION ERROR] Invalid Supabase URL format!
 
 Current value: ${supabaseUrl}
 
@@ -64,11 +69,11 @@ Please check your .env.development file and update VITE_SUPABASE_URL.
   // Validate it's a Supabase URL
   if (!isValidSupabaseUrl(supabaseUrl)) {
     const errorMessage = `
-❌ Invalid Supabase project URL!
+[CONFIGURATION ERROR] Invalid Supabase project URL!
 
 Current value: ${supabaseUrl}
 
-The URL must be a valid Supabase project URL (should contain .supabase.co).
+The URL must be a valid Supabase project URL (hostname must end with .supabase.co).
 Example: https://your-project.supabase.co
 
 Common issues:
@@ -79,7 +84,7 @@ Common issues:
 To fix:
 1. Go to https://supabase.com/dashboard
 2. Create a new project or select an existing one
-3. Copy the Project URL from Settings → API
+3. Copy the Project URL from Settings -> API
 4. Update VITE_SUPABASE_URL in your .env.development file
 
 See README.md for setup instructions.
