@@ -74,8 +74,13 @@ export default function SlotSelector({
   };
 
   const handleInitializeSlots = async () => {
-    if (!isCreator || !totalMembers || totalMembers < 2) {
-      toast.error('Unable to initialize slots');
+    if (!isCreator) {
+      toast.error('Only the group creator can initialize slots');
+      return;
+    }
+
+    if (!totalMembers || totalMembers < 2) {
+      toast.error('Groups must have at least 2 members to initialize slots');
       return;
     }
 
@@ -156,7 +161,7 @@ export default function SlotSelector({
                 Slots were not initialized for this group. This might be due to a temporary issue during group creation.
               </p>
             </div>
-            {isCreator && totalMembers > 0 && (
+            {isCreator && totalMembers >= 2 && (
               <Button
                 onClick={handleInitializeSlots}
                 disabled={initializing}

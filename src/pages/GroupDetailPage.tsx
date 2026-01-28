@@ -516,7 +516,7 @@ export default function GroupDetailPage() {
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
                   disabled={isProcessingPayment}
-                  isCreator={true}
+                  isCreator={isCreator}
                   totalMembers={group.totalMembers}
                 />
                 
