@@ -274,8 +274,8 @@ export default function GroupDetailPage() {
       const preferredSlot = isCreator ? selectedSlot : (userJoinRequest?.preferred_slot || 1);
 
       // Open Paystack payment popup
-      // Using callback_url to redirect user to payment success page after payment
-      // This ensures proper session handling and backend verification
+      // Note: callback_url parameter is provided but doesn't work with Paystack's popup/inline flow
+      // Manual navigation is handled in the onSuccess callback instead
       await paystackService.initializePayment({
         email: user.email!,
         amount: paystackService.toKobo(totalAmount), // Convert to kobo
@@ -298,6 +298,9 @@ export default function GroupDetailPage() {
             // Navigate to payment success page for verification
             // Note: callback_url doesn't work with Paystack popup, must navigate manually
             navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
+          } else {
+            // Payment was not successful or user closed modal without completing
+            toast.error('Payment was not completed. Please try again.');
           }
         },
         onClose: () => {
