@@ -12,6 +12,7 @@ import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
 import { parseAtomicRPCResponse, isTransientError } from '@/lib/utils/auth';
+import { enhanceSupabaseConnectionError } from '@/lib/utils/errorHandling';
 
 interface AuthContextType {
   user: User | null;
@@ -78,17 +79,22 @@ async function createUserProfileViaRPC(
     fullName: fullName
   });
   
-  const rpcResponse = await supabase.rpc('create_user_profile_atomic', {
-    p_user_id: authUser.id,
-    p_email: userEmail,
-    p_phone: phone,
-    p_full_name: fullName,
-  });
-  
-  console.log('createUserProfileViaRPC: RPC response:', rpcResponse);
-  
-  parseAtomicRPCResponse(rpcResponse, 'User profile creation');
-  console.log('createUserProfileViaRPC: Profile created successfully');
+  try {
+    const rpcResponse = await supabase.rpc('create_user_profile_atomic', {
+      p_user_id: authUser.id,
+      p_email: userEmail,
+      p_phone: phone,
+      p_full_name: fullName,
+    });
+    
+    console.log('createUserProfileViaRPC: RPC response:', rpcResponse);
+    
+    parseAtomicRPCResponse(rpcResponse, 'User profile creation');
+    console.log('createUserProfileViaRPC: Profile created successfully');
+  } catch (error) {
+    // Enhance connection errors with helpful troubleshooting info
+    throw enhanceSupabaseConnectionError(error, 'creating user profile');
+  }
 }
 
 /**
@@ -266,7 +272,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error('loadUserProfile: Error loading profile:', error);
       setUser(null);
-      throw error;
+      // Enhance connection errors with helpful troubleshooting info
+      throw enhanceSupabaseConnectionError(error, 'loading user profile');
     } finally {
       isLoadingProfileRef.current = false;
     }
