@@ -10,31 +10,34 @@
  * memberships. It ensures that:
  * 
  * 1. Payment actually succeeded (verified with Paystack using SECRET key)
- * 2. User is authenticated (JWT token validation)
- * 3. Business logic executes atomically (add member, activate status)
+ * 2. Payment record is ALWAYS stored (even if auth fails)
+ * 3. Business logic executes only with valid authentication
  * 4. Operations are idempotent (safe to retry)
  * 
  * What This Function Does:
  * ========================
  * 
- * STEP 1: Authentication
- * - Validates JWT token from request header
- * - Ensures user is logged in
- * - Prevents unauthorized verification attempts
- * 
- * STEP 2: Verify Payment with Paystack
+ * STEP 1: Verify Payment with Paystack (NO AUTH REQUIRED)
  * - Calls Paystack API: GET /transaction/verify/{reference}
  * - Uses Paystack SECRET KEY (stored in environment, NEVER exposed to frontend)
  * - Validates payment actually succeeded on Paystack's end
  * - Gets complete payment details (amount, channel, customer, etc.)
  * 
- * STEP 3: Store Payment Record
+ * STEP 2: Store Payment Record (NO AUTH REQUIRED)
  * - Updates/inserts payment record in database
  * - Sets verified = true for successful payments
- * - Stores all Paystack data for audit trail
+ * - Stores all Paystack data for audit trail (fees, paystack_id, domain, etc.)
+ * - **CRITICAL**: This happens BEFORE auth check, ensuring payment is always recorded
  * - Idempotent: Safe to call multiple times
  * 
- * STEP 4: Execute Business Logic (THE CRITICAL PART)
+ * STEP 3: Verify User Authentication (FOR BUSINESS LOGIC ONLY)
+ * - Validates JWT token from request header
+ * - Ensures user is logged in
+ * - Validates user matches payment user_id in metadata
+ * - If auth fails: Payment is stored, webhook will activate membership later
+ * - If auth succeeds: Proceed to business logic
+ * 
+ * STEP 4: Execute Business Logic (ONLY IF AUTHENTICATED)
  * Depending on payment type in metadata:
  * 
  * - group_creation:
@@ -62,7 +65,30 @@
  * 
  * STEP 5: Return Result
  * - Success: { success: true, verified: true, position: N, ... }
+ * - Auth expired: { success: false, verified: true, payment_status: 'verified_pending_activation', requiresRefresh: true }
  * - Failure: { success: false, error: "...", ... }
+ * 
+ * Why Payment Storage Happens Before Auth Check:
+ * =============================================
+ * 
+ * **The Problem**: User sessions can expire during payment flow
+ * - User initiates payment (JWT token valid)
+ * - User completes payment on Paystack (takes 2-5 minutes)
+ * - User returns to app (JWT token may have expired)
+ * - Old flow: Auth check failed → payment never stored → data lost
+ * 
+ * **The Solution**: Store payment first, then check auth
+ * - Payment data from Paystack is ALWAYS stored
+ * - Database has complete payment record (fees, paystack_id, domain, paid_at)
+ * - Auth only required for immediate membership activation
+ * - If auth fails: Payment stored, webhook activates membership later
+ * - If auth succeeds: Payment stored, membership activated immediately
+ * 
+ * **Benefits**:
+ * - No payment data loss regardless of auth state
+ * - User can refresh page to retry activation with new session
+ * - Webhook has complete payment data to work with
+ * - Better user experience with clear "refresh to activate" message
  * 
  * Why Two Processors (verify-payment + webhook)?
  * ==============================================
@@ -76,7 +102,7 @@
  * paystack-webhook (backup):
  * - SECONDARY processor
  * - Asynchronous: Triggered by Paystack notification
- * - Backup in case verify-payment fails (network issues, timeout, etc.)
+ * - Backup in case verify-payment fails (network issues, timeout, auth issues)
  * - Runs same business logic
  * - Idempotent: Won't duplicate if verify-payment already succeeded
  * 
@@ -87,13 +113,13 @@
  * Security Features:
  * ==================
  * 
- * ✅ JWT Authentication: Requires valid user session
  * ✅ Secret Key Protection: Uses Paystack secret key (backend only)
- * ✅ Signature Validation: Webhook validates Paystack signature
+ * ✅ JWT Authentication: Requires valid user session for business logic
+ * ✅ User Validation: Verifies user matches payment metadata
  * ✅ Idempotent Operations: Safe to call multiple times
  * ✅ Amount Validation: Verifies payment amount matches expected
- * ✅ User Validation: Verifies user is authorized for the action
  * ✅ Atomic Operations: All database changes or none
+ * ✅ Payment Storage: Always stored even if auth fails (no data loss)
  * 
  * Usage:
  * ======
@@ -102,7 +128,7 @@
  * Headers: { "Authorization": "Bearer <jwt_token>" }
  * Body: { "reference": "payment_reference" }
  * 
- * Response (Success):
+ * Response (Success - Activated):
  * {
  *   "success": true,
  *   "payment_status": "success",
@@ -110,6 +136,18 @@
  *   "amount": 500000,
  *   "message": "Payment verified and processed successfully",
  *   "position": 3,
+ *   "data": { "reference": "...", "amount": 500000, ... }
+ * }
+ * 
+ * Response (Success - Pending Activation):
+ * {
+ *   "success": false,
+ *   "payment_status": "verified_pending_activation",
+ *   "verified": true,
+ *   "amount": 500000,
+ *   "message": "Payment verified and stored. Please refresh to complete activation.",
+ *   "error": "Session expired during verification",
+ *   "requiresRefresh": true,
  *   "data": { "reference": "...", "amount": 500000, ... }
  * }
  * 
@@ -368,24 +406,6 @@ serve(async (req) => {
     console.log('=== PAYMENT VERIFICATION START ===');
     console.log('Timestamp:', new Date().toISOString());
     
-    // Verify authentication
-    const authHeader = req.headers.get('Authorization');
-    console.log('[Auth] Authorization header present:', !!authHeader);
-    
-    if (!authHeader) {
-      console.error('[Auth] Missing authorization header');
-      return new Response(
-        JSON.stringify({ 
-          error: 'Unauthorized',
-          message: 'Authentication required',
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
     // Get environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -406,63 +426,6 @@ serve(async (req) => {
       );
     }
 
-    // Validate JWT format
-    const jwt = authHeader.replace('Bearer ', '');
-    console.log('[Auth] JWT length:', jwt.length);
-    
-    if (!jwt || jwt.length < 20 || jwt.split('.').length !== 3) {
-      console.error('[Auth] Invalid JWT format');
-      return new Response(
-        JSON.stringify({ 
-          error: 'Unauthorized',
-          message: 'Invalid authentication token format',
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    // Create auth client with user JWT
-    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: authHeader,
-        },
-      },
-    });
-    
-    // Verify user
-    console.log('[Auth] Verifying user...');
-    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-    
-    if (authError || !user) {
-      console.error('[Auth] User verification failed:', authError?.message);
-      
-      let errorMessage = 'Invalid or expired authentication token';
-      if (authError?.message?.toLowerCase().includes('expired')) {
-        errorMessage = 'Session expired. Please log in again.';
-      }
-      
-      return new Response(
-        JSON.stringify({ 
-          error: 'Unauthorized',
-          message: errorMessage,
-        }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    console.log('[Auth] User authenticated:', user.id);
-
-    // Create service role client for database operations
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    console.log('[Database] Service role client created');
-
     // Parse request body
     const body: VerifyPaymentRequest = await req.json();
     const { reference } = body;
@@ -478,6 +441,10 @@ serve(async (req) => {
     }
 
     console.log('[Verification] Reference:', reference);
+
+    // Create service role client for database operations
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    console.log('[Database] Service role client created');
 
     // Step 1: Verify with Paystack
     let verificationResponse: PaystackVerificationResponse;
@@ -545,108 +512,212 @@ serve(async (req) => {
       );
     }
 
-    // Step 3: Execute business logic for successful payments
+    // Step 3: Verify authentication for business logic
+    // This is done AFTER storing payment so payment is always recorded
+    // But BEFORE business logic to ensure only authenticated users can activate memberships
+    const authHeader = req.headers.get('Authorization');
+    console.log('[Auth] Authorization header present:', !!authHeader);
+    
+    let user = null;
+    let authError = null;
+    
+    if (authHeader) {
+      // Validate JWT format
+      const jwt = authHeader.replace('Bearer ', '');
+      console.log('[Auth] JWT length:', jwt.length);
+      
+      if (jwt && jwt.length >= 20 && jwt.split('.').length === 3) {
+        // Create auth client with user JWT
+        const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+          global: {
+            headers: {
+              Authorization: authHeader,
+            },
+          },
+        });
+        
+        // Verify user
+        console.log('[Auth] Verifying user...');
+        const authResult = await supabaseAuth.auth.getUser();
+        user = authResult.data?.user || null;
+        authError = authResult.error;
+        
+        if (authError || !user) {
+          console.error('[Auth] User verification failed:', authError?.message);
+        } else {
+          console.log('[Auth] User authenticated:', user.id);
+          
+          // Verify the authenticated user matches the payment user
+          const paymentUserId = verificationResponse.data.metadata?.user_id;
+          if (paymentUserId && user.id !== paymentUserId) {
+            console.error('[Auth] User ID mismatch:', { authenticated: user.id, payment: paymentUserId });
+            user = null;
+            authError = new Error('User ID mismatch');
+          }
+        }
+      } else {
+        console.error('[Auth] Invalid JWT format');
+        authError = new Error('Invalid JWT format');
+      }
+    } else {
+      console.warn('[Auth] No authorization header provided');
+      authError = new Error('No authorization header');
+    }
+
+    // Step 4: Execute business logic for successful payments (only if authenticated)
     let businessLogicResult: { success: boolean; message: string; position?: number } | null = null;
     
-    if (verificationResponse.data.status === 'success') {
-      console.log('[Business Logic] Payment successful, executing business logic...');
-      const paymentType = verificationResponse.data.metadata?.type;
+    // Handle failed payments early
+    if (verificationResponse.data.status !== 'success') {
+      console.log('[Verification] Payment not successful:', verificationResponse.data.status);
+      console.log('=== PAYMENT VERIFICATION END ===');
       
-      console.log('[Business Logic] Payment type:', paymentType);
-      
-      // THIS IS WHERE MEMBERSHIP GETS ACTIVATED!
-      // ========================================
-      // Based on payment type, we execute different business logic:
-      // 
-      // 1. group_creation: Add creator as member with selected slot
-      // 2. group_join: Add new member with assigned position
-      // 3. contribution: Mark contribution as paid
-      // 
-      // All operations are idempotent - safe to call multiple times.
-      // The webhook will also execute this logic as a backup.
-      
-      try {
-        if (paymentType === 'group_creation') {
-          // CREATOR PAYMENT: Add creator as first member
-          console.log('[Business Logic] Processing group creation payment');
-          businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
-          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
-        } else if (paymentType === 'group_join') {
-          // JOIN PAYMENT: Add new member to group
-          console.log('[Business Logic] Processing group join payment');
-          businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
-          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
-          if (businessLogicResult.position) {
-            console.log('[Business Logic] Assigned position:', businessLogicResult.position);
-          }
-        } else if (paymentType === 'contribution') {
-          // CONTRIBUTION PAYMENT: Mark contribution as paid
-          console.log('[Business Logic] Processing contribution payment');
-          businessLogicResult = await processContributionPayment(supabase, verificationResponse.data);
-          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
-        } else {
-          console.warn('[Business Logic] Unknown payment type:', paymentType);
-          businessLogicResult = { 
-            success: true, 
-            message: 'Payment verified. Type-specific processing will be handled by webhook.' 
-          };
+      return new Response(
+        JSON.stringify({
+          success: false,
+          payment_status: verificationResponse.data.status,
+          verified: false,
+          amount: verificationResponse.data.amount,
+          message: `Payment ${verificationResponse.data.status}. Please try again or contact support.`,
+          error: `Payment ${verificationResponse.data.status}`,
+          data: {
+            reference: verificationResponse.data.reference,
+            amount: verificationResponse.data.amount,
+            currency: verificationResponse.data.currency,
+            channel: verificationResponse.data.channel,
+          },
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
+      );
+    }
+    
+    // Payment successful - process business logic
+    console.log('[Business Logic] Payment successful, checking authentication for business logic...');
+    const paymentType = verificationResponse.data.metadata?.type;
+    
+    console.log('[Business Logic] Payment type:', paymentType);
+    
+    // Check if user is authenticated
+    if (!user || authError) {
+      console.warn('[Business Logic] User not authenticated, skipping business logic');
+      console.warn('[Business Logic] Auth error:', authError?.message);
+      console.log('[Business Logic] Payment stored. Webhook will process business logic.');
+      
+      // Payment is stored but business logic needs authentication
+      // Return success with message to refresh
+      return new Response(
+        JSON.stringify({
+          success: false,
+          payment_status: 'verified_pending_activation',
+          verified: true,
+          amount: verificationResponse.data.amount,
+          message: 'Payment verified and stored successfully. Please refresh the page to complete activation. If the issue persists, your payment will be activated automatically within a few minutes.',
+          error: authError?.message || 'Authentication required for immediate activation',
+          requiresRefresh: true,
+          data: {
+            reference: verificationResponse.data.reference,
+            amount: verificationResponse.data.amount,
+            currency: verificationResponse.data.currency,
+            channel: verificationResponse.data.channel,
+            paid_at: verificationResponse.data.paid_at,
+          },
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
+    // THIS IS WHERE MEMBERSHIP GETS ACTIVATED!
+    // ========================================
+    // Based on payment type, we execute different business logic:
+    // 
+    // 1. group_creation: Add creator as member with selected slot
+    // 2. group_join: Add new member with assigned position
+    // 3. contribution: Mark contribution as paid
+    // 
+    // All operations are idempotent - safe to call multiple times.
+    // The webhook will also execute this logic as a backup.
+    
+    try {
+      if (paymentType === 'group_creation') {
+        // CREATOR PAYMENT: Add creator as first member
+        console.log('[Business Logic] Processing group creation payment');
+        businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
+        console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
+      } else if (paymentType === 'group_join') {
+        // JOIN PAYMENT: Add new member to group
+        console.log('[Business Logic] Processing group join payment');
+        businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
+        console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
+        if (businessLogicResult.position) {
+          console.log('[Business Logic] Assigned position:', businessLogicResult.position);
+        }
+      } else if (paymentType === 'contribution') {
+        // CONTRIBUTION PAYMENT: Mark contribution as paid
+        console.log('[Business Logic] Processing contribution payment');
+        businessLogicResult = await processContributionPayment(supabase, verificationResponse.data);
+        console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
+      } else {
+        console.warn('[Business Logic] Unknown payment type:', paymentType);
+        businessLogicResult = { 
+          success: true, 
+          message: 'Payment verified. Type-specific processing will be handled by webhook.' 
+        };
+      }
 
-        if (businessLogicResult?.success === false) {
-          console.error('[Business Logic] Processing failed:', businessLogicResult.message);
-          return new Response(
-            JSON.stringify({
-              success: false,
-              payment_status: 'verified_but_processing_failed',
-              verified: true,
-              amount: verificationResponse.data.amount,
-              message: `Payment verified but failed to process: ${businessLogicResult.message}`,
-              error: businessLogicResult.message,
-            }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
-        }
-      } catch (error) {
-        console.error('[Business Logic] Exception:', error.message);
+      if (businessLogicResult?.success === false) {
+        console.error('[Business Logic] Processing failed:', businessLogicResult.message);
         return new Response(
           JSON.stringify({
             success: false,
-            payment_status: 'verified_but_processing_error',
+            payment_status: 'verified_but_processing_failed',
             verified: true,
             amount: verificationResponse.data.amount,
-            message: 'Payment verified but encountered an error during processing. Webhook will retry.',
-            error: error.message || 'Business logic execution failed',
+            message: `Payment verified but failed to process: ${businessLogicResult.message}. Your payment will be activated automatically within a few minutes.`,
+            error: businessLogicResult.message,
           }),
           {
-            status: 500,
+            status: 400,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           }
         );
       }
-      
-      console.log('[Business Logic] Execution complete:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
+    } catch (error) {
+      console.error('[Business Logic] Exception:', error.message);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          payment_status: 'verified_but_processing_error',
+          verified: true,
+          amount: verificationResponse.data.amount,
+          message: 'Payment verified but encountered an error during processing. Your payment will be activated automatically within a few minutes.',
+          error: error.message || 'Business logic execution failed',
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
+    
+    console.log('[Business Logic] Execution complete:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
 
     console.log('[Verification] Payment verified and processed successfully');
     console.log('=== PAYMENT VERIFICATION END ===');
 
     // Return success response
-    const paymentVerified = verificationResponse.data.status === 'success';
-    const businessLogicSucceeded = businessLogicResult === null || businessLogicResult.success === true;
-    const overallSuccess = paymentVerified && businessLogicSucceeded;
-
     return new Response(
       JSON.stringify({
-        success: overallSuccess,
-        payment_status: verificationResponse.data.status,
-        verified: paymentVerified,
+        success: true,
+        payment_status: 'success',
+        verified: true,
         amount: verificationResponse.data.amount,
-        message: businessLogicResult?.message || (paymentVerified 
-          ? 'Payment verified and processed successfully' 
-          : 'Payment verification completed'),
+        message: businessLogicResult?.message || 'Payment verified and processed successfully',
         position: businessLogicResult?.position,
         data: {
           reference: verificationResponse.data.reference,
