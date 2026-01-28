@@ -3,20 +3,86 @@
  * 
  * This module provides a minimal, clean interface for payment operations.
  * 
+ * SECURITY ARCHITECTURE:
+ * ======================
+ * 
+ * FRONTEND (this file):
+ * - Uses Paystack PUBLIC key only (safe for browser)
+ * - Initializes payments and creates pending records
+ * - Calls backend for verification (never trusts client-side data)
+ * - Displays results from backend
+ * 
+ * BACKEND (Supabase Edge Functions):
+ * - Uses Paystack SECRET key (never exposed to frontend)
+ * - Verifies payments with Paystack API
+ * - Executes business logic (add members, activate memberships)
+ * - Single source of truth for payment status
+ * 
  * Architecture Principles:
  * ✅ Backend is the single source of truth for payment state
  * ✅ Frontend only initiates payments and displays backend-confirmed results
  * ✅ No frontend state management for payment verification
  * ✅ All business logic executed on backend
  * ✅ Proper idempotency throughout
+ * ✅ JWT authentication for all backend calls
+ * ✅ Row-level security on database
  * 
- * Flow:
- * 1. Frontend calls initialize* to create pending payment record and get reference
- * 2. Frontend opens Paystack modal with reference
- * 3. User completes payment on Paystack
- * 4. Frontend receives callback and calls verifyPayment
- * 5. Backend verifies with Paystack, updates DB, executes business logic
- * 6. Frontend displays result from backend
+ * Payment Verification Flow:
+ * ==========================
+ * 
+ * 1. INITIALIZATION (Frontend):
+ *    - User clicks "Join Group" or "Pay Contribution"
+ *    - Call initializeGroupJoinPayment() or initializeContributionPayment()
+ *    - Creates PENDING payment record in database
+ *    - Returns unique payment reference
+ * 
+ * 2. PAYMENT (Paystack):
+ *    - Open Paystack modal with reference
+ *    - User completes payment on Paystack's platform
+ *    - Paystack validates payment method
+ *    - User redirected back with reference in URL
+ * 
+ * 3. VERIFICATION (Backend via this file's verifyPayment function):
+ *    - Frontend calls verifyPayment(reference)
+ *    - Backend Edge Function:
+ *      a. Authenticates user (JWT token)
+ *      b. Calls Paystack API with SECRET key
+ *      c. Validates payment actually succeeded
+ *      d. Stores payment record in database
+ *      e. EXECUTES BUSINESS LOGIC:
+ *         - Adds member to group
+ *         - Activates membership (has_paid_security_deposit = true)
+ *         - Assigns payout position
+ *         - Creates contribution records
+ *      f. Returns verification result
+ * 
+ * 4. CONFIRMATION (Frontend):
+ *    - Display success/failure to user
+ *    - Redirect to group page (membership now active)
+ * 
+ * 5. BACKUP (Webhook):
+ *    - Paystack sends webhook notification
+ *    - Edge Function processes same business logic
+ *    - Idempotent: Safe if already processed
+ * 
+ * Why This Architecture is Secure:
+ * =================================
+ * 
+ * ❌ INSECURE (what we DON'T do):
+ *    if (paystackCallback.status === 'success') {
+ *      addUserToGroup();  // ❌ Client can fake this!
+ *    }
+ * 
+ * ✅ SECURE (what we DO):
+ *    - Client calls backend with reference
+ *    - Backend verifies with Paystack using SECRET key
+ *    - Backend executes business logic after verification
+ *    - Client displays result from backend
+ * 
+ * This prevents:
+ * - Payment fraud (can't fake successful payment)
+ * - Unauthorized access (can't add themselves without paying)
+ * - Data tampering (all changes via backend with proper auth)
  */
 
 import { createClient } from '@/lib/client/supabase';
@@ -325,6 +391,13 @@ function isSessionExpired(session: { expires_at?: number } | null): boolean {
  * 
  * Frontend MUST NOT assume payment success based on Paystack callback alone.
  * 
+ * SECURITY: This function includes multiple layers of protection:
+ * - Validates payment reference format
+ * - Refreshes JWT token before calling backend
+ * - Retries on network/timeout errors
+ * - Does NOT retry on authentication errors (user must refresh)
+ * - Backend validates with Paystack using SECRET key
+ * 
  * @param reference - Payment reference from Paystack
  * @param retries - Number of retry attempts (default: 3)
  * @param delayMs - Delay between retries in milliseconds (default: 2000)
@@ -336,6 +409,19 @@ export async function verifyPayment(
   delayMs: number = VERIFICATION_DELAY_MS
 ): Promise<PaymentVerificationResult> {
   console.log('[Payment Verify] Starting verification for:', reference);
+  
+  // Validate reference format
+  if (!reference || typeof reference !== 'string' || reference.trim().length === 0) {
+    console.error('[Payment Verify] Invalid reference format:', reference);
+    return {
+      success: false,
+      payment_status: 'invalid_reference',
+      verified: false,
+      amount: 0,
+      message: 'Invalid payment reference',
+      error: 'Payment reference is required and must be a non-empty string',
+    };
+  }
   
   const supabase = createClient();
   
