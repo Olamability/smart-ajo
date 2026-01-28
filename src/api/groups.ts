@@ -731,6 +731,44 @@ export const getAvailableSlots = async (
 };
 
 /**
+ * Manually initialize slots for a group (fallback if automatic initialization failed)
+ */
+export const initializeGroupSlots = async (
+  groupId: string,
+  totalSlots: number
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const supabase = createClient();
+
+    const { data, error } = await supabase.rpc('initialize_group_slots', {
+      p_group_id: groupId,
+      p_total_slots: totalSlots,
+    });
+
+    if (error) {
+      console.error('Error initializing group slots:', error);
+      return { success: false, error: error.message };
+    }
+
+    // The function returns a table with success and error_message columns
+    if (data && data.length > 0) {
+      const result = data[0];
+      if (!result.success) {
+        return { success: false, error: result.error_message };
+      }
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Initialize group slots error:', error);
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to initialize group slots'),
+    };
+  }
+};
+
+/**
  * Delete a group (only if creator and no members have paid)
  * Used for cleanup when group creation payment fails or is cancelled
  */

@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getAvailableSlots } from '@/api';
+import { getAvailableSlots, initializeGroupSlots } from '@/api';
 import {
   Card,
   CardContent,
@@ -23,6 +23,7 @@ import {
   Lock, 
   Loader2,
   Info,
+  RefreshCw,
 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
@@ -32,6 +33,8 @@ interface SlotSelectorProps {
   selectedSlot: number | null;
   onSlotSelect: (slotNumber: number) => void;
   disabled?: boolean;
+  isCreator?: boolean;
+  totalMembers?: number;
 }
 
 export default function SlotSelector({
@@ -39,11 +42,14 @@ export default function SlotSelector({
   selectedSlot,
   onSlotSelect,
   disabled = false,
+  isCreator = false,
+  totalMembers = 0,
 }: SlotSelectorProps) {
   const [slots, setSlots] = useState<
     { slot_number: number; payout_cycle: number; status: string }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(false);
 
   useEffect(() => {
     loadSlots();
@@ -64,6 +70,34 @@ export default function SlotSelector({
       toast.error('Failed to load available slots');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleInitializeSlots = async () => {
+    if (!isCreator) {
+      toast.error('Only the group creator can initialize slots');
+      return;
+    }
+
+    if (!totalMembers || totalMembers < 2) {
+      toast.error('Groups must have at least 2 members to initialize slots');
+      return;
+    }
+
+    setInitializing(true);
+    try {
+      const result = await initializeGroupSlots(groupId, totalMembers);
+      if (result.success) {
+        toast.success('Slots initialized successfully!');
+        await loadSlots(); // Reload slots
+      } else {
+        toast.error(result.error || 'Failed to initialize slots');
+      }
+    } catch (error) {
+      console.error('Error initializing slots:', error);
+      toast.error('Failed to initialize slots');
+    } finally {
+      setInitializing(false);
     }
   };
 
@@ -113,18 +147,66 @@ export default function SlotSelector({
     );
   }
 
+  const availableCount = slots.filter(s => s.status === 'available').length;
+
   if (slots.length === 0) {
     return (
-      <Alert>
+      <Alert variant="destructive">
         <Info className="h-4 w-4" />
         <AlertDescription>
-          No slots available for this group yet.
+          <div className="space-y-3">
+            <div>
+              <p className="font-semibold">No payout slots found</p>
+              <p className="text-sm mt-1">
+                Slots were not initialized for this group. This might be due to a temporary issue during group creation.
+              </p>
+            </div>
+            {isCreator && totalMembers >= 2 && (
+              <Button
+                onClick={handleInitializeSlots}
+                disabled={initializing}
+                size="sm"
+                variant="outline"
+              >
+                {initializing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Initializing Slots...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Initialize Slots
+                  </>
+                )}
+              </Button>
+            )}
+            {!isCreator && (
+              <p className="text-sm">
+                Please contact the group creator or try refreshing the page.
+              </p>
+            )}
+          </div>
         </AlertDescription>
       </Alert>
     );
   }
 
-  const availableCount = slots.filter(s => s.status === 'available').length;
+  if (availableCount === 0) {
+    return (
+      <Alert>
+        <Info className="h-4 w-4" />
+        <AlertDescription>
+          <div className="space-y-2">
+            <p className="font-semibold">All slots are currently taken</p>
+            <p className="text-sm">
+              All {slots.length} payout positions have been selected. Please check back later or contact the group creator.
+            </p>
+          </div>
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   return (
     <Card>
