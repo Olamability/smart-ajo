@@ -290,6 +290,7 @@ export default function GroupDetailPage() {
         onSuccess: (response: PaystackResponse) => {
           // Payment modal closed - redirect to verification page
           // The PaymentSuccessPage will handle verification with proper session management
+          setIsProcessingPayment(false);
           if (response.status === 'success') {
             toast.info('Payment received! Redirecting to verification...', {
               duration: 3000,
@@ -298,7 +299,6 @@ export default function GroupDetailPage() {
             // Note: callback_url doesn't work with Paystack popup, must navigate manually
             navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
           }
-          setIsProcessingPayment(false);
         },
         onClose: () => {
           // User closed payment modal without completing
