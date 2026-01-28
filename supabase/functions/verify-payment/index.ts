@@ -1,26 +1,127 @@
 /**
- * Payment Verification Edge Function - Clean Implementation
+ * Payment Verification Edge Function - PRIMARY Payment Processor
  * 
- * This is the PRIMARY payment processor. It:
- * 1. Verifies payment with Paystack API using secret key
- * 2. Stores/updates payment record in database
- * 3. Executes business logic immediately (add member, create contribution, etc.)
- * 4. Returns verification result to frontend
+ * This is the MAIN payment processor that runs synchronously when a user
+ * completes payment. It provides immediate feedback to the user.
  * 
- * This function runs synchronously when user completes payment, so membership
- * activation happens immediately - no polling or waiting required.
+ * CRITICAL SECURITY FUNCTION:
+ * ===========================
+ * This function is the ONLY way to securely verify payments and activate
+ * memberships. It ensures that:
  * 
- * The paystack-webhook function acts as a BACKUP with same logic for reliability.
+ * 1. Payment actually succeeded (verified with Paystack using SECRET key)
+ * 2. User is authenticated (JWT token validation)
+ * 3. Business logic executes atomically (add member, activate status)
+ * 4. Operations are idempotent (safe to retry)
  * 
- * Security:
- * - Requires user authentication (JWT token)
- * - Uses Paystack SECRET key (never exposed to frontend)
- * - Idempotent (safe to call multiple times)
+ * What This Function Does:
+ * ========================
+ * 
+ * STEP 1: Authentication
+ * - Validates JWT token from request header
+ * - Ensures user is logged in
+ * - Prevents unauthorized verification attempts
+ * 
+ * STEP 2: Verify Payment with Paystack
+ * - Calls Paystack API: GET /transaction/verify/{reference}
+ * - Uses Paystack SECRET KEY (stored in environment, NEVER exposed to frontend)
+ * - Validates payment actually succeeded on Paystack's end
+ * - Gets complete payment details (amount, channel, customer, etc.)
+ * 
+ * STEP 3: Store Payment Record
+ * - Updates/inserts payment record in database
+ * - Sets verified = true for successful payments
+ * - Stores all Paystack data for audit trail
+ * - Idempotent: Safe to call multiple times
+ * 
+ * STEP 4: Execute Business Logic (THE CRITICAL PART)
+ * Depending on payment type in metadata:
+ * 
+ * - group_creation:
+ *   ✅ Add creator as member to group
+ *   ✅ Set has_paid_security_deposit = true
+ *   ✅ Set status = 'active'
+ *   ✅ Assign payout position (preferred_slot)
+ *   ✅ Create first contribution record
+ *   ✅ Create transaction records
+ * 
+ * - group_join:
+ *   ✅ Add user as member to group
+ *   ✅ Set has_paid_security_deposit = true
+ *   ✅ Set status = 'active'
+ *   ✅ Assign payout position (next available or preferred)
+ *   ✅ Create first contribution record
+ *   ✅ Create transaction records
+ *   ✅ Update join request status to 'joined'
+ * 
+ * - contribution:
+ *   ✅ Update contribution status to 'paid'
+ *   ✅ Set paid_date
+ *   ✅ Create transaction record
+ *   ✅ Create notification
+ * 
+ * STEP 5: Return Result
+ * - Success: { success: true, verified: true, position: N, ... }
+ * - Failure: { success: false, error: "...", ... }
+ * 
+ * Why Two Processors (verify-payment + webhook)?
+ * ==============================================
+ * 
+ * verify-payment (this file):
+ * - PRIMARY processor
+ * - Synchronous: Runs immediately when user clicks verify
+ * - Provides instant feedback to user
+ * - User waits for result before proceeding
+ * 
+ * paystack-webhook (backup):
+ * - SECONDARY processor
+ * - Asynchronous: Triggered by Paystack notification
+ * - Backup in case verify-payment fails (network issues, timeout, etc.)
+ * - Runs same business logic
+ * - Idempotent: Won't duplicate if verify-payment already succeeded
+ * 
+ * Both are necessary for reliability:
+ * - User gets immediate feedback (verify-payment)
+ * - Payment still processed if immediate verification fails (webhook)
+ * 
+ * Security Features:
+ * ==================
+ * 
+ * ✅ JWT Authentication: Requires valid user session
+ * ✅ Secret Key Protection: Uses Paystack secret key (backend only)
+ * ✅ Signature Validation: Webhook validates Paystack signature
+ * ✅ Idempotent Operations: Safe to call multiple times
+ * ✅ Amount Validation: Verifies payment amount matches expected
+ * ✅ User Validation: Verifies user is authorized for the action
+ * ✅ Atomic Operations: All database changes or none
  * 
  * Usage:
+ * ======
+ * 
  * POST /verify-payment
  * Headers: { "Authorization": "Bearer <jwt_token>" }
  * Body: { "reference": "payment_reference" }
+ * 
+ * Response (Success):
+ * {
+ *   "success": true,
+ *   "payment_status": "success",
+ *   "verified": true,
+ *   "amount": 500000,
+ *   "message": "Payment verified and processed successfully",
+ *   "position": 3,
+ *   "data": { "reference": "...", "amount": 500000, ... }
+ * }
+ * 
+ * Response (Failure):
+ * {
+ *   "success": false,
+ *   "payment_status": "failed",
+ *   "verified": false,
+ *   "amount": 0,
+ *   "message": "Payment verification failed",
+ *   "error": "..."
+ * }
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -453,13 +554,36 @@ serve(async (req) => {
       
       console.log('[Business Logic] Payment type:', paymentType);
       
+      // THIS IS WHERE MEMBERSHIP GETS ACTIVATED!
+      // ========================================
+      // Based on payment type, we execute different business logic:
+      // 
+      // 1. group_creation: Add creator as member with selected slot
+      // 2. group_join: Add new member with assigned position
+      // 3. contribution: Mark contribution as paid
+      // 
+      // All operations are idempotent - safe to call multiple times.
+      // The webhook will also execute this logic as a backup.
+      
       try {
         if (paymentType === 'group_creation') {
+          // CREATOR PAYMENT: Add creator as first member
+          console.log('[Business Logic] Processing group creation payment');
           businessLogicResult = await processGroupCreationPayment(supabase, verificationResponse.data);
+          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
         } else if (paymentType === 'group_join') {
+          // JOIN PAYMENT: Add new member to group
+          console.log('[Business Logic] Processing group join payment');
           businessLogicResult = await processGroupJoinPayment(supabase, verificationResponse.data);
+          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
+          if (businessLogicResult.position) {
+            console.log('[Business Logic] Assigned position:', businessLogicResult.position);
+          }
         } else if (paymentType === 'contribution') {
+          // CONTRIBUTION PAYMENT: Mark contribution as paid
+          console.log('[Business Logic] Processing contribution payment');
           businessLogicResult = await processContributionPayment(supabase, verificationResponse.data);
+          console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
         } else {
           console.warn('[Business Logic] Unknown payment type:', paymentType);
           businessLogicResult = { 

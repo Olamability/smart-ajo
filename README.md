@@ -74,6 +74,7 @@ See [PAYMENT_INTEGRATION_README.md](./PAYMENT_INTEGRATION_README.md) for complet
 
 ### Payment Integration ⚡
 - **[Payment Integration README](./PAYMENT_INTEGRATION_README.md)** - **🔥 Quick start guide for payment setup (START HERE!)**
+- **[Payment Verification & Membership Activation](./PAYMENT_VERIFICATION.md)** - **🔐 How payment verification and membership activation works securely**
 - **[Complete Deployment Guide](./PAYSTACK_INTEGRATION_DEPLOYMENT.md)** - **📖 Comprehensive payment deployment guide**
 - **[Callback URL Guide](./CALLBACK_URL_GUIDE.md)** - **📍 What are callback URLs and how to find them**
 - **[Paystack Configuration](./PAYSTACK_CONFIGURATION.md)** - Payment integration setup and webhook configuration
