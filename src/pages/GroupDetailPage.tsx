@@ -516,6 +516,8 @@ export default function GroupDetailPage() {
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
                   disabled={isProcessingPayment}
+                  isCreator={true}
+                  totalMembers={group.totalMembers}
                 />
                 
                 {selectedSlot && (
@@ -669,12 +671,14 @@ export default function GroupDetailPage() {
             </DialogHeader>
 
             <div className="space-y-4">
-              {id && (
+              {id && group && (
                 <SlotSelector
                   groupId={id}
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
                   disabled={isJoining}
+                  isCreator={false}
+                  totalMembers={group.totalMembers}
                 />
               )}
             </div>
