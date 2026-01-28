@@ -56,6 +56,8 @@ See [PAYMENT_INTEGRATION_README.md](./PAYMENT_INTEGRATION_README.md) for complet
 
    **Important:** Replace placeholder values with your actual keys!
    
+   **⚠️ Getting connection errors?** See [Troubleshooting Supabase Connection](./docs/TROUBLESHOOTING_SUPABASE_CONNECTION.md) for help with `ERR_NAME_NOT_RESOLVED` and `Failed to fetch` errors.
+   
    See [ENVIRONMENT_SETUP.md](./ENVIRONMENT_SETUP.md) for detailed configuration instructions.
 
 5. **Start the development server**
@@ -69,6 +71,7 @@ See [PAYMENT_INTEGRATION_README.md](./PAYMENT_INTEGRATION_README.md) for complet
 
 ### Getting Started
 - **[Environment Setup Guide](./ENVIRONMENT_SETUP.md)** - Detailed environment configuration and troubleshooting
+- **[Troubleshooting Supabase Connection](./docs/TROUBLESHOOTING_SUPABASE_CONNECTION.md)** - **🔥 Fix DNS errors and connection issues**
 - **[Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)** - **Step-by-step guide for deploying to Vercel**
 - **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Production deployment instructions
 
