@@ -254,7 +254,7 @@ if (hash !== signature) {
 
 2. **Create/Join a group** (triggers payment)
 
-3. **Complete test payment** on Paystack (use test card: 4084 0840 8408 4081)
+3. **Complete test payment** on Paystack (use test card: **4084 0840 8408 4081 - TEST MODE ONLY**)
 
 4. **Monitor console logs:**
    - Frontend: Check browser console for verification steps

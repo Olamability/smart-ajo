@@ -1,5 +1,5 @@
 /**
- * Payment Success Page - Clean Implementation
+ * Payment Success Page - Enhanced Implementation
  * 
  * This page handles the payment callback from Paystack and verifies payment
  * securely with the backend.
@@ -87,7 +87,7 @@ export default function PaymentSuccessPage() {
 
   const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
-      console.error('[Payment Success] ❌ No payment reference provided');
+      console.error('[Payment Success] ERROR: No payment reference provided');
       console.error('[Payment Success] URL params:', window.location.search);
       setVerificationStatus('failed');
       setVerificationMessage('No payment reference provided. Please check your payment status or contact support.');
@@ -97,7 +97,7 @@ export default function PaymentSuccessPage() {
 
     // Validate reference format
     if (reference.trim().length === 0) {
-      console.error('[Payment Success] ❌ Invalid payment reference (empty)');
+      console.error('[Payment Success] ERROR: Invalid payment reference (empty)');
       setVerificationStatus('failed');
       setVerificationMessage('Invalid payment reference. Please contact support.');
       toast.error('Invalid payment reference');
@@ -128,7 +128,7 @@ export default function PaymentSuccessPage() {
       
       if (result.verified && result.success) {
         // Payment verified AND business logic completed
-        console.log('[Payment Success] ✅ Payment verified successfully');
+        console.log('[Payment Success] SUCCESS: Payment verified successfully');
         console.log('[Payment Success] Membership activated');
         if (result.position) {
           console.log('[Payment Success] Assigned position:', result.position);
@@ -142,7 +142,7 @@ export default function PaymentSuccessPage() {
         toast.success('Payment verified! Your membership is active.');
       } else {
         // Verification failed or pending
-        console.error('[Payment Success] ❌ Verification failed');
+        console.error('[Payment Success] ERROR: Verification failed');
         console.error('[Payment Success] Status:', result.payment_status);
         console.error('[Payment Success] Error:', result.error || result.message);
         
@@ -161,7 +161,7 @@ export default function PaymentSuccessPage() {
         }
       }
     } catch (error) {
-      console.error('[Payment Success] ❌ Exception during verification');
+      console.error('[Payment Success] ERROR: Exception during verification');
       console.error('[Payment Success] Error:', error);
       setVerificationStatus('failed');
       setVerificationMessage('Failed to verify payment. Please contact support.');
@@ -231,7 +231,8 @@ export default function PaymentSuccessPage() {
                 {verificationMessage || DEFAULT_VERIFYING_MESSAGE}
               </p>
               <p className="text-xs text-muted-foreground text-center">
-                🔐 Securely verifying your payment with our backend...
+                <span className="inline-block mr-1" role="img" aria-label="lock">🔐</span>
+                Securely verifying your payment with our backend...
               </p>
             </div>
           )}
@@ -243,7 +244,8 @@ export default function PaymentSuccessPage() {
                   : verificationMessage || 'Your transaction has been verified and processed successfully.'}
               </p>
               <p className="text-xs text-green-600 text-center">
-                ✅ Your membership is now active!
+                <span className="inline-block mr-1" role="img" aria-label="check">✅</span>
+                Your membership is now active!
               </p>
             </div>
           )}
@@ -276,13 +278,22 @@ export default function PaymentSuccessPage() {
           {/* Action Buttons */}
           <div className="flex gap-2 w-full mt-4">
             {verificationStatus === 'failed' && (
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={handleVerifyPayment}
-              >
-                Retry Verification
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleVerifyPayment}
+                >
+                  Retry Verification
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => navigate('/transactions')}
+                >
+                  View Transactions
+                </Button>
+              </>
             )}
             <Button
               className="flex-1"
