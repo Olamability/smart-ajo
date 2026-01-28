@@ -140,6 +140,18 @@ export default function PaymentSuccessPage() {
         );
         setMemberPosition(result.position || null);
         toast.success('Payment verified! Your membership is active.');
+      } else if (result.verified && result.payment_status === 'verified_pending_activation') {
+        // Payment verified but authentication expired, needs refresh
+        console.log('[Payment Success] PENDING: Payment verified, refreshing for activation...');
+        setVerificationStatus('verifying');
+        setVerificationMessage('Payment verified! Refreshing to complete activation...');
+        toast.info('Payment verified! Refreshing to activate membership...');
+        
+        // Auto-refresh after 2 seconds
+        setTimeout(() => {
+          console.log('[Payment Success] Auto-refreshing page for activation');
+          window.location.reload();
+        }, 2000);
       } else {
         // Verification failed or pending
         console.error('[Payment Success] ERROR: Verification failed');
