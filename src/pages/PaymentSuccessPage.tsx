@@ -72,6 +72,8 @@ import { toast } from 'sonner';
 type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
 
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
+const MAX_REFRESH_ATTEMPTS = 2; // Limit refresh attempts to prevent infinite loops
+const REFRESH_ATTEMPT_KEY = 'payment_refresh_attempts';
 
 export default function PaymentSuccessPage() {
   const navigate = useNavigate();
@@ -84,6 +86,21 @@ export default function PaymentSuccessPage() {
   // Paystack may send either 'reference' or 'trxref'
   const reference = searchParams.get('reference') || searchParams.get('trxref');
   const groupId = searchParams.get('group');
+
+  // Track refresh attempts to prevent infinite loops
+  const getRefreshAttempts = useCallback(() => {
+    const stored = sessionStorage.getItem(REFRESH_ATTEMPT_KEY);
+    return stored ? parseInt(stored, 10) : 0;
+  }, []);
+
+  const incrementRefreshAttempts = useCallback(() => {
+    const current = getRefreshAttempts();
+    sessionStorage.setItem(REFRESH_ATTEMPT_KEY, String(current + 1));
+  }, [getRefreshAttempts]);
+
+  const clearRefreshAttempts = useCallback(() => {
+    sessionStorage.removeItem(REFRESH_ATTEMPT_KEY);
+  }, []);
 
   const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
@@ -134,6 +151,9 @@ export default function PaymentSuccessPage() {
           console.log('[Payment Success] Assigned position:', result.position);
         }
         
+        // Clear refresh attempts on success
+        clearRefreshAttempts();
+        
         setVerificationStatus('verified');
         setVerificationMessage(
           result.message || 'Payment verified successfully! Your membership is now active.'
@@ -142,16 +162,34 @@ export default function PaymentSuccessPage() {
         toast.success('Payment verified! Your membership is active.');
       } else if (result.verified && result.payment_status === 'verified_pending_activation') {
         // Payment verified but authentication expired, needs refresh
-        console.log('[Payment Success] PENDING: Payment verified, refreshing for activation...');
-        setVerificationStatus('verifying');
-        setVerificationMessage('Payment verified! Refreshing to complete activation...');
-        toast.info('Payment verified! Refreshing to activate membership...');
+        console.log('[Payment Success] PENDING: Payment verified, checking refresh attempts...');
         
-        // Auto-refresh after 2 seconds
-        setTimeout(() => {
+        const attempts = getRefreshAttempts();
+        console.log('[Payment Success] Refresh attempts:', attempts);
+        
+        if (attempts < MAX_REFRESH_ATTEMPTS) {
+          // Auto-refresh with incremented counter
           console.log('[Payment Success] Auto-refreshing page for activation');
-          window.location.reload();
-        }, 2000);
+          setVerificationStatus('verifying');
+          setVerificationMessage('Payment verified! Refreshing to complete activation...');
+          toast.info('Payment verified! Refreshing to activate membership...');
+          
+          incrementRefreshAttempts();
+          
+          // Auto-refresh after 2 seconds
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+        } else {
+          // Max attempts reached, ask user to log in
+          console.warn('[Payment Success] Max refresh attempts reached');
+          setVerificationStatus('failed');
+          setVerificationMessage(
+            'Payment verified successfully, but your session has expired. Please log in again to complete activation. Your payment is safe and will be activated automatically within a few minutes.'
+          );
+          toast.error('Session expired. Please log in again to complete activation.');
+          clearRefreshAttempts();
+        }
       } else {
         // Verification failed or pending
         console.error('[Payment Success] ERROR: Verification failed');

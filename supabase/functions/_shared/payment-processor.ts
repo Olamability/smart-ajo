@@ -9,6 +9,25 @@
  * - paystack-webhook: Asynchronous, Paystack-initiated (backup)
  * 
  * All functions are idempotent - safe to call multiple times.
+ * 
+ * RACE CONDITION HANDLING:
+ * ========================
+ * Both verify-payment and webhook may process the same payment concurrently.
+ * This is handled through idempotency checks:
+ * 
+ * 1. Check if has_paid_security_deposit is already true
+ * 2. If yes, return success with existing position (no-op)
+ * 3. If no, proceed with member creation/update
+ * 
+ * Database constraints also prevent duplicate member records:
+ * - UNIQUE(group_id, user_id) on group_members table
+ * - UNIQUE(group_id, user_id, cycle_number) on contributions table
+ * 
+ * This ensures:
+ * - No duplicate memberships created
+ * - No duplicate contributions recorded
+ * - Same position assigned regardless of which function processes first
+ * - Safe concurrent execution without locks
  */
 
 // Type for Supabase client (using any for Deno edge runtime compatibility)
