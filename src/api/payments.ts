@@ -496,10 +496,6 @@ export async function verifyPayment(
   
   console.log('[Payment Verify] User authenticated successfully');
   
-  // Create a fresh Supabase client with the refreshed session
-  // This ensures the client's internal state has the latest access token
-  const supabaseWithRefreshedSession = createClient();
-  
   // Retry loop for verification
   let lastError = '';
   
@@ -515,8 +511,8 @@ export async function verifyPayment(
       }
       
       // Call verify-payment Edge Function
-      // Use the fresh client that has the refreshed session in its internal state
-      const { data, error } = await supabaseWithRefreshedSession.functions.invoke('verify-payment', {
+      // Use the same client that has the refreshed session
+      const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
       });
       
