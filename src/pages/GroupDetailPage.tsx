@@ -274,8 +274,8 @@ export default function GroupDetailPage() {
       const preferredSlot = isCreator ? selectedSlot : (userJoinRequest?.preferred_slot || 1);
 
       // Open Paystack payment popup
-      // Using callback_url to redirect user to payment success page after payment
-      // This ensures proper session handling and backend verification
+      // Note: callback_url parameter is provided but doesn't work with Paystack's popup/inline flow
+      // Manual navigation is handled in the onSuccess callback instead
       await paystackService.initializePayment({
         email: user.email!,
         amount: paystackService.toKobo(totalAmount), // Convert to kobo
@@ -288,15 +288,20 @@ export default function GroupDetailPage() {
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
         onSuccess: (response: PaystackResponse) => {
-          // Payment modal closed - Paystack will redirect to callback_url
+          // Payment modal closed - redirect to verification page
           // The PaymentSuccessPage will handle verification with proper session management
+          setIsProcessingPayment(false);
           if (response.status === 'success') {
             toast.info('Payment received! Redirecting to verification...', {
               duration: 3000,
             });
+            // Navigate to payment success page for verification
+            // Note: callback_url doesn't work with Paystack popup, must navigate manually
+            navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
+          } else {
+            // Payment was not successful or user closed modal without completing
+            toast.error('Payment was not completed. Please try again.');
           }
-          // Don't process here - let callback_url page handle everything
-          setIsProcessingPayment(false);
         },
         onClose: () => {
           // User closed payment modal without completing
