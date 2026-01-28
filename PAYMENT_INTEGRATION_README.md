@@ -169,7 +169,24 @@ Set via: `supabase secrets set PAYSTACK_SECRET_KEY=sk_test_...`
 **Cause:** Paystack secret key not set
 **Fix:** `supabase secrets set PAYSTACK_SECRET_KEY=sk_test_...`
 
-### 3. Payment succeeds but member not activated
+### 3. "401 Unauthorized" error during payment verification
+
+**Example:**
+```
+[Payment Verify] Edge Function error: Edge Function returned a non-2xx status code
+[Payment Success] ERROR: Verification failed
+[Payment Success] Status: unauthorized
+```
+
+**Cause:** Supabase client session not refreshed properly before calling edge function
+**Fix:** This has been fixed in the latest code. The `verifyPayment()` function now:
+1. Refreshes the session
+2. Creates a fresh Supabase client with the updated session
+3. Uses the fresh client to invoke the edge function
+
+If you still see this error, ensure you have the latest code from the repository.
+
+### 4. Payment succeeds but member not activated
 
 **Cause:** Business logic error or database permission issue
 **Debug:**
@@ -177,10 +194,24 @@ Set via: `supabase secrets set PAYSTACK_SECRET_KEY=sk_test_...`
 supabase functions logs verify-payment --limit 50
 ```
 
-### 4. "Session expired" error
+### 5. "Session expired" error
 
 **Cause:** JWT token expired during payment
 **Fix:** User should refresh page - webhook will still process payment
+
+### 6. Referrer Policy warnings in console
+
+**Example:**
+```
+Referrer Policy: Ignoring the less restricted referrer policy "no-referrer-when-downgrade" 
+for the cross-site request: https://api.paystack.co/checkout/request_inline
+```
+
+**Cause:** Paystack's embedded JavaScript uses a different referrer policy than our site
+**Impact:** None - these are informational warnings, not errors
+**Fix:** These warnings are harmless and expected. They cannot be controlled from our code since they originate from Paystack's third-party scripts. You can safely ignore them.
+
+**Note:** Our site uses `strict-origin-when-cross-origin` referrer policy for better security. Paystack's scripts use their own policy which is less restrictive but appropriate for their payment processing needs.
 
 ## Files Overview
 
