@@ -511,7 +511,8 @@ export async function verifyPayment(
       }
       
       // Call verify-payment Edge Function
-      // Use the same client that has the refreshed session
+      // Use the same client that called refreshSession() to ensure the refreshed access token is used
+      // Creating a new client here would not have the updated session in its Authorization header
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
       });
