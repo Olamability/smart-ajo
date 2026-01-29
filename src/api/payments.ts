@@ -495,7 +495,6 @@ export async function verifyPayment(
   }
   
   console.log('[Payment Verify] User authenticated successfully');
-  const accessToken = activeSession.access_token;
   
   // Retry loop for verification
   let lastError = '';
@@ -511,12 +510,11 @@ export async function verifyPayment(
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
       
-      // Call verify-payment Edge Function with explicit auth token
+      // Call verify-payment Edge Function
+      // Use the same client that called refreshSession() to ensure the refreshed access token is used
+      // Creating a new client here would not have the updated session in its Authorization header
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
       });
       
       console.log('[Payment Verify] Edge Function response:', {
