@@ -182,22 +182,22 @@ if [ -f ".env" ] || [ -f ".env.development" ]; then
     ENV_FILE=".env"
     [ -f ".env.development" ] && ENV_FILE=".env.development"
     
-    if grep -q "VITE_PAYSTACK_PUBLIC_KEY" "$ENV_FILE"; then
+    if grep -E "^VITE_PAYSTACK_PUBLIC_KEY=.+" "$ENV_FILE" > /dev/null 2>&1; then
         print_success "VITE_PAYSTACK_PUBLIC_KEY configured"
     else
-        print_error "VITE_PAYSTACK_PUBLIC_KEY not found in $ENV_FILE"
+        print_error "VITE_PAYSTACK_PUBLIC_KEY not found or empty in $ENV_FILE"
     fi
     
-    if grep -q "VITE_SUPABASE_URL" "$ENV_FILE"; then
+    if grep -E "^VITE_SUPABASE_URL=.+" "$ENV_FILE" > /dev/null 2>&1; then
         print_success "VITE_SUPABASE_URL configured"
     else
-        print_error "VITE_SUPABASE_URL not found in $ENV_FILE"
+        print_error "VITE_SUPABASE_URL not found or empty in $ENV_FILE"
     fi
     
-    if grep -q "VITE_SUPABASE_ANON_KEY" "$ENV_FILE"; then
+    if grep -E "^VITE_SUPABASE_ANON_KEY=.+" "$ENV_FILE" > /dev/null 2>&1; then
         print_success "VITE_SUPABASE_ANON_KEY configured"
     else
-        print_error "VITE_SUPABASE_ANON_KEY not found in $ENV_FILE"
+        print_error "VITE_SUPABASE_ANON_KEY not found or empty in $ENV_FILE"
     fi
 else
     print_error "No .env file found"

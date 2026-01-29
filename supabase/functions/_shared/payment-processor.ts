@@ -155,6 +155,7 @@ export async function processGroupCreationPayment(
     const userId = metadata?.user_id;
     const groupId = metadata?.group_id;
     if (userId && groupId) {
+      // Check both member status AND payment verification
       const { data: existingMember } = await supabase
         .from('group_members')
         .select('id, position, has_paid_security_deposit')
@@ -162,7 +163,16 @@ export async function processGroupCreationPayment(
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (existingMember?.has_paid_security_deposit) {
+      const { data: paymentRecord } = await supabase
+        .from('payments')
+        .select('verified, status')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      // Only return success if BOTH conditions are met:
+      // 1. Member has paid security deposit
+      // 2. Payment is verified
+      if (existingMember?.has_paid_security_deposit && paymentRecord?.verified) {
         console.log('[Payment Processor] Payment already processed by concurrent request');
         return {
           success: true,
@@ -171,10 +181,10 @@ export async function processGroupCreationPayment(
         };
       }
     }
-    // If not processed yet, return error to retry
+    // If not fully processed yet, return error to indicate processing in progress
     return {
       success: false,
-      message: 'Payment is being processed by another request. Please wait.',
+      message: 'Payment is being processed by another request. Please wait a moment and refresh.',
     };
   }
 
@@ -379,6 +389,7 @@ export async function processGroupJoinPayment(
     const userId = metadata?.user_id;
     const groupId = metadata?.group_id;
     if (userId && groupId) {
+      // Check both member status AND payment verification
       const { data: existingMember } = await supabase
         .from('group_members')
         .select('id, position, has_paid_security_deposit')
@@ -386,7 +397,16 @@ export async function processGroupJoinPayment(
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (existingMember?.has_paid_security_deposit) {
+      const { data: paymentRecord } = await supabase
+        .from('payments')
+        .select('verified, status')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      // Only return success if BOTH conditions are met:
+      // 1. Member has paid security deposit
+      // 2. Payment is verified
+      if (existingMember?.has_paid_security_deposit && paymentRecord?.verified) {
         console.log('[Payment Processor] Payment already processed by concurrent request');
         return {
           success: true,
@@ -395,10 +415,10 @@ export async function processGroupJoinPayment(
         };
       }
     }
-    // If not processed yet, return error to retry
+    // If not fully processed yet, return error to indicate processing in progress
     return {
       success: false,
-      message: 'Payment is being processed by another request. Please wait.',
+      message: 'Payment is being processed by another request. Please wait a moment and refresh.',
     };
   }
 
@@ -629,13 +649,23 @@ export async function processContributionPayment(
     // Check if payment was already processed by the other process
     const contributionId = metadata?.contribution_id;
     if (contributionId) {
+      // Check both contribution status AND payment verification
       const { data: contribution } = await supabase
         .from('contributions')
         .select('status')
         .eq('id', contributionId)
         .maybeSingle();
 
-      if (contribution?.status === 'paid') {
+      const { data: paymentRecord } = await supabase
+        .from('payments')
+        .select('verified, status')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      // Only return success if BOTH conditions are met:
+      // 1. Contribution is marked as paid
+      // 2. Payment is verified
+      if (contribution?.status === 'paid' && paymentRecord?.verified) {
         console.log('[Payment Processor] Payment already processed by concurrent request');
         return {
           success: true,
@@ -643,10 +673,10 @@ export async function processContributionPayment(
         };
       }
     }
-    // If not processed yet, return error to retry
+    // If not fully processed yet, return error to indicate processing in progress
     return {
       success: false,
-      message: 'Payment is being processed by another request. Please wait.',
+      message: 'Payment is being processed by another request. Please wait a moment and refresh.',
     };
   }
 
