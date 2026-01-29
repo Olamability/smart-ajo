@@ -94,10 +94,39 @@ export async function createPaymentTransactions(
 // ============================================================================
 
 /**
+ * Acquire advisory lock for payment processing
+ * Prevents race conditions between verify-payment and webhook
+ */
+async function acquirePaymentLock(
+  supabase: SupabaseClient,
+  reference: string
+): Promise<boolean> {
+  try {
+    // Use PostgreSQL advisory lock based on payment reference hash
+    // This prevents concurrent processing of the same payment
+    const { data, error } = await supabase.rpc('acquire_payment_lock', {
+      payment_ref: reference,
+    });
+
+    if (error) {
+      console.error('[Payment Lock] Failed to acquire lock:', error);
+      return false;
+    }
+
+    console.log('[Payment Lock] Lock acquired:', !!data);
+    return !!data;
+  } catch (error) {
+    console.error('[Payment Lock] Exception:', error);
+    return false;
+  }
+}
+
+/**
  * Process group creation payment
  * Adds creator as member with selected slot and marks payment complete
  * 
  * Idempotent: Safe to call multiple times
+ * Uses advisory locks to prevent race conditions
  */
 export async function processGroupCreationPayment(
   supabase: SupabaseClient,
@@ -117,6 +146,37 @@ export async function processGroupCreationPayment(
   console.log('[Payment Processor] Processing group creation payment');
   console.log('[Payment Processor] Reference:', reference);
   console.log('[Payment Processor] Status:', status);
+
+  // Try to acquire lock to prevent concurrent processing
+  const lockAcquired = await acquirePaymentLock(supabase, reference);
+  if (!lockAcquired) {
+    console.log('[Payment Processor] Lock not acquired - another process is handling this payment');
+    // Check if payment was already processed by the other process
+    const userId = metadata?.user_id;
+    const groupId = metadata?.group_id;
+    if (userId && groupId) {
+      const { data: existingMember } = await supabase
+        .from('group_members')
+        .select('id, position, has_paid_security_deposit')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existingMember?.has_paid_security_deposit) {
+        console.log('[Payment Processor] Payment already processed by concurrent request');
+        return {
+          success: true,
+          message: 'Payment already processed',
+          position: existingMember.position,
+        };
+      }
+    }
+    // If not processed yet, return error to retry
+    return {
+      success: false,
+      message: 'Payment is being processed by another request. Please wait.',
+    };
+  }
 
   // Verify payment was successful
   if (status !== 'success') {
@@ -290,6 +350,7 @@ export async function processGroupCreationPayment(
  * Activates member who already joined or adds new member with payment
  * 
  * Idempotent: Safe to call multiple times
+ * Uses advisory locks to prevent race conditions
  */
 export async function processGroupJoinPayment(
   supabase: SupabaseClient,
@@ -309,6 +370,37 @@ export async function processGroupJoinPayment(
   console.log('[Payment Processor] Processing group join payment');
   console.log('[Payment Processor] Reference:', reference);
   console.log('[Payment Processor] Status:', status);
+
+  // Try to acquire lock to prevent concurrent processing
+  const lockAcquired = await acquirePaymentLock(supabase, reference);
+  if (!lockAcquired) {
+    console.log('[Payment Processor] Lock not acquired - another process is handling this payment');
+    // Check if payment was already processed by the other process
+    const userId = metadata?.user_id;
+    const groupId = metadata?.group_id;
+    if (userId && groupId) {
+      const { data: existingMember } = await supabase
+        .from('group_members')
+        .select('id, position, has_paid_security_deposit')
+        .eq('group_id', groupId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existingMember?.has_paid_security_deposit) {
+        console.log('[Payment Processor] Payment already processed by concurrent request');
+        return {
+          success: true,
+          message: 'Payment already processed',
+          position: existingMember.position,
+        };
+      }
+    }
+    // If not processed yet, return error to retry
+    return {
+      success: false,
+      message: 'Payment is being processed by another request. Please wait.',
+    };
+  }
 
   // Verify payment was successful
   if (status !== 'success') {
@@ -509,6 +601,7 @@ export async function processGroupJoinPayment(
  * Updates contribution status to paid and creates transaction record
  * 
  * Idempotent: Safe to call multiple times
+ * Uses advisory locks to prevent race conditions
  */
 export async function processContributionPayment(
   supabase: SupabaseClient,
@@ -528,6 +621,34 @@ export async function processContributionPayment(
   console.log('[Payment Processor] Processing contribution payment');
   console.log('[Payment Processor] Reference:', reference);
   console.log('[Payment Processor] Status:', status);
+
+  // Try to acquire lock to prevent concurrent processing
+  const lockAcquired = await acquirePaymentLock(supabase, reference);
+  if (!lockAcquired) {
+    console.log('[Payment Processor] Lock not acquired - another process is handling this payment');
+    // Check if payment was already processed by the other process
+    const contributionId = metadata?.contribution_id;
+    if (contributionId) {
+      const { data: contribution } = await supabase
+        .from('contributions')
+        .select('status')
+        .eq('id', contributionId)
+        .maybeSingle();
+
+      if (contribution?.status === 'paid') {
+        console.log('[Payment Processor] Payment already processed by concurrent request');
+        return {
+          success: true,
+          message: 'Contribution already processed',
+        };
+      }
+    }
+    // If not processed yet, return error to retry
+    return {
+      success: false,
+      message: 'Payment is being processed by another request. Please wait.',
+    };
+  }
 
   if (status !== 'success') {
     console.error('[Payment Processor] Invalid payment status:', status);

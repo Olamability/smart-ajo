@@ -69,7 +69,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { verifyPayment } from '@/api/payments';
 import { toast } from 'sonner';
 
-type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed';
+type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed' | 'session_expired';
 
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
 const MAX_REFRESH_ATTEMPTS = 2; // Limit refresh attempts to prevent infinite loops
@@ -183,7 +183,7 @@ export default function PaymentSuccessPage() {
         } else {
           // Max attempts reached, ask user to log in
           console.warn('[Payment Success] Max refresh attempts reached');
-          setVerificationStatus('failed');
+          setVerificationStatus('session_expired');
           setVerificationMessage(
             'Payment verified successfully, but your session has expired. Please log in again to complete activation. Your payment is safe and will be activated automatically within a few minutes.'
           );
@@ -267,6 +267,9 @@ export default function PaymentSuccessPage() {
           {verificationStatus === 'verified' && (
             <CheckCircle2 className="h-12 w-12 text-green-600" />
           )}
+          {verificationStatus === 'session_expired' && (
+            <AlertCircle className="h-12 w-12 text-yellow-600" />
+          )}
           {verificationStatus === 'failed' && (
             <AlertCircle className="h-12 w-12 text-red-600" />
           )}
@@ -299,6 +302,17 @@ export default function PaymentSuccessPage() {
               </p>
             </div>
           )}
+          {verificationStatus === 'session_expired' && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                {verificationMessage || 'Session expired. Please log in again to complete activation.'}
+                <div className="mt-2 text-xs">
+                  💡 Your payment was successful and will be activated automatically within a few minutes. You can also log in to complete activation immediately.
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
           {verificationStatus === 'failed' && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -327,6 +341,30 @@ export default function PaymentSuccessPage() {
 
           {/* Action Buttons */}
           <div className="flex gap-2 w-full mt-4">
+            {verificationStatus === 'session_expired' && (
+              <>
+                <Button
+                  variant="default"
+                  className="flex-1"
+                  onClick={() => {
+                    // Store current reference to retry after login
+                    sessionStorage.setItem('pending_payment_reference', reference || '');
+                    sessionStorage.setItem('pending_payment_group', groupId || '');
+                    // Redirect to login
+                    navigate(`/login?redirect=/payment-success?reference=${reference}&group=${groupId}`);
+                  }}
+                >
+                  Login and Retry
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={handleNavigation}
+                >
+                  {groupId ? 'Back to Group' : 'Go to Dashboard'}
+                </Button>
+              </>
+            )}
             {verificationStatus === 'failed' && (
               <>
                 <Button
