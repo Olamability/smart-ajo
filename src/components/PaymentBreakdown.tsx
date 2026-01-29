@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { loadPaystackScript } from "@paystack/inline-js";
+import PaystackPop from "@paystack/inline-js";
 
 // Helper to get Paystack public key from env
 const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
@@ -31,14 +31,13 @@ export const PaystackPaymentBreakdown: React.FC<PaymentBreakdownProps> = ({
     setVerifying(false);
     setVerified(false);
     try {
-      await loadPaystackScript();
-      // @ts-ignore
-      const handler = window.PaystackPop.setup({
+      const paystack = new PaystackPop();
+      paystack.newTransaction({
         key: PAYSTACK_PUBLIC_KEY,
         email,
         amount: amount * 100, // Paystack expects kobo
-        ref: reference,
-        callback: async function (response: any) {
+        reference,
+        onSuccess: async (response: any) => {
           setLoading(false);
           setVerifying(true);
           try {
@@ -66,12 +65,11 @@ export const PaystackPaymentBreakdown: React.FC<PaymentBreakdownProps> = ({
             if (onPaymentError) onPaymentError(e);
           }
         },
-        onClose: function () {
+        onCancel: () => {
           setLoading(false);
           setError("Payment window closed.");
         },
       });
-      handler.openIframe();
     } catch (err: any) {
       setLoading(false);
       setError("Failed to load Paystack. Please try again.");
