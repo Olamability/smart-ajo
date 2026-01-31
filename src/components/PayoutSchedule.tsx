@@ -90,7 +90,6 @@ export default function PayoutSchedule({
     try {
       const currentMember = members.find(m => m.rotationPosition === currentCycle);
       if (!currentMember || !user) throw new Error('User not found');
-      
       await initiatePaystackPayment({
         email: user.email,
         amount: netPayoutAmount,
