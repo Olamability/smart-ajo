@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/client/supabase';
 import { getGroupMembers } from '@/api';
 import type { GroupMember } from '@/types';
+import { initiatePaystackPayment } from '@/lib/paystack';
 import {
   Card,
   CardContent,
@@ -25,8 +26,6 @@ interface PayoutScheduleProps {
   totalCycles: number;
   netPayoutAmount: number;
 }
-
-const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
 
 export default function PayoutSchedule({
   groupId,
@@ -73,24 +72,6 @@ export default function PayoutSchedule({
     }).format(amount);
   };
 
-  // Load Paystack script from CDN
-  const loadPaystackScriptFromCDN = (): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      // Check if script is already loaded
-      if (window.PaystackPop) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = 'https://js.paystack.co/v1/inline.js';
-      script.async = true;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('Failed to load Paystack script'));
-      document.body.appendChild(script);
-    });
-  };
-
   const getPayoutStatus = (position: number) => {
     if (position < currentCycle) {
       return { label: 'Completed', color: 'bg-green-500', icon: <CheckCircle className="w-4 h-4" /> };
@@ -107,16 +88,12 @@ export default function PayoutSchedule({
     setPaying(true);
     setPaymentStatus('pending');
     try {
-      // Load Paystack script from CDN
-      await loadPaystackScriptFromCDN();
       const currentMember = members.find(m => m.rotationPosition === currentCycle);
       if (!currentMember || !user) throw new Error('User not found');
-      // @ts-ignore
-      const handler = window.PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY,
+      await initiatePaystackPayment({
         email: user.email,
-        amount: netPayoutAmount * 100,
-        ref: `${groupId}-${currentCycle}-${user.id}-${Date.now()}`,
+        amount: netPayoutAmount,
+        reference: `${groupId}-${currentCycle}-${user.id}-${Date.now()}`,
         metadata: {
           custom_fields: [
             { display_name: 'Group', variable_name: 'group_id', value: groupId },
@@ -124,7 +101,7 @@ export default function PayoutSchedule({
             { display_name: 'User', variable_name: 'user_id', value: user.id },
           ],
         },
-        callback: async (response: any) => {
+        onSuccess: async (response) => {
           // Call Supabase Edge Function to verify
           try {
             const verifyRes = await fetch(
@@ -150,12 +127,11 @@ export default function PayoutSchedule({
           }
           setPaying(false);
         },
-        onClose: function () {
+        onClose: () => {
           setPaying(false);
           setPaymentStatus('idle');
         },
       });
-      handler.openIframe();
     } catch (err: any) {
       setPaying(false);
       setPaymentStatus('error');
