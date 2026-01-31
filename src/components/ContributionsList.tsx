@@ -97,7 +97,8 @@ export default function ContributionsList({
         publicKey: paystackKey,
         onSuccess: () => {
           // Redirect to payment success page for verification
-          window.location.href = `/payment-success?reference=${result.reference}&type=contribution`;
+          // Include group ID so user can navigate back to group after verification
+          window.location.href = `/payment-success?reference=${result.reference}&type=contribution&group=${groupId}`;
         },
         onClose: () => {
           toast.info('Payment cancelled');
