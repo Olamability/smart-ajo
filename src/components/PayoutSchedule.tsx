@@ -5,7 +5,6 @@
  */
 
 import { useState, useEffect } from 'react';
-import { loadPaystackScript } from '@paystack/inline-js';
 import { createClient } from '@/lib/client/supabase';
 import { getGroupMembers } from '@/api';
 import type { GroupMember } from '@/types';
@@ -74,6 +73,24 @@ export default function PayoutSchedule({
     }).format(amount);
   };
 
+  // Load Paystack script from CDN
+  const loadPaystackScriptFromCDN = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Check if script is already loaded
+      if (window.PaystackPop) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://js.paystack.co/v1/inline.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load Paystack script'));
+      document.body.appendChild(script);
+    });
+  };
+
   const getPayoutStatus = (position: number) => {
     if (position < currentCycle) {
       return { label: 'Completed', color: 'bg-green-500', icon: <CheckCircle className="w-4 h-4" /> };
@@ -90,7 +107,8 @@ export default function PayoutSchedule({
     setPaying(true);
     setPaymentStatus('pending');
     try {
-      await loadPaystackScript();
+      // Load Paystack script from CDN
+      await loadPaystackScriptFromCDN();
       const currentMember = members.find(m => m.rotationPosition === currentCycle);
       if (!currentMember || !user) throw new Error('User not found');
       // @ts-ignore
