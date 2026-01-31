@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getGroupContributions, initializeContributionPayment } from '@/api';
 import type { Contribution } from '@/types';
+import { initiatePaystackPayment } from '@/lib/paystack';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -80,21 +81,11 @@ export default function ContributionsList({
         return;
       }
 
-      // Get Paystack public key from environment
-      const paystackKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
-      
-      if (!paystackKey) {
-        toast.error('Payment configuration error. Please contact support.');
-        setProcessingPayment(null);
-        return;
-      }
-
-      // Prepare Paystack config
-      const config = {
-        reference: result.reference,
+      // Open Paystack payment popup using centralized service
+      await initiatePaystackPayment({
         email: user.email || '',
-        amount: Math.round(contribution.amount * 100), // Convert to kobo
-        publicKey: paystackKey,
+        amount: contribution.amount,
+        reference: result.reference,
         onSuccess: () => {
           // Redirect to payment success page for verification
           // Include group ID so user can navigate back to group after verification
@@ -104,18 +95,7 @@ export default function ContributionsList({
           toast.info('Payment cancelled');
           setProcessingPayment(null);
         },
-      };
-
-      // Initialize Paystack and open payment modal
-      const PaystackPop = (window as { PaystackPop?: { setup: (config: any) => { openIframe: () => void } } }).PaystackPop;
-      
-      if (PaystackPop) {
-        const handler = PaystackPop.setup(config);
-        handler.openIframe();
-      } else {
-        toast.error('Payment system not loaded. Please refresh the page.');
-        setProcessingPayment(null);
-      }
+      });
       
     } catch (error) {
       console.error('Payment error:', error);

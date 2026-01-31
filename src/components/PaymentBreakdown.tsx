@@ -1,25 +1,5 @@
 import React, { useState } from "react";
-
-// Helper to get Paystack public key from env
-const PAYSTACK_PUBLIC_KEY = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY;
-
-// Load Paystack script from CDN
-const loadPaystackScriptFromCDN = (): Promise<void> => {
-  return new Promise((resolve, reject) => {
-    // Check if script is already loaded
-    if (window.PaystackPop) {
-      resolve();
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://js.paystack.co/v1/inline.js';
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Paystack script'));
-    document.body.appendChild(script);
-  });
-};
+import { initiatePaystackPayment } from '@/lib/paystack';
 
 interface PaymentBreakdownProps {
   amount: number; // Amount in Naira
@@ -49,16 +29,11 @@ export const PaystackPaymentBreakdown: React.FC<PaymentBreakdownProps> = ({
     setVerifying(false);
     setVerified(false);
     try {
-      // Load Paystack script from CDN
-      await loadPaystackScriptFromCDN();
-
-      // @ts-ignore
-      const handler = window.PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY,
+      await initiatePaystackPayment({
         email,
-        amount: amount * 100, // Paystack expects kobo
-        ref: reference,
-        callback: async (response: any) => {
+        amount,
+        reference,
+        onSuccess: async (response) => {
           setLoading(false);
           setVerifying(true);
           try {
@@ -86,14 +61,11 @@ export const PaystackPaymentBreakdown: React.FC<PaymentBreakdownProps> = ({
             if (onPaymentError) onPaymentError(e);
           }
         },
-        onCancel: () => {
+        onClose: () => {
           setLoading(false);
           setError("Payment window closed.");
         },
       });
-
-      // Open the payment modal
-      handler.openIframe();
     } catch (err: any) {
       setLoading(false);
       setError("Failed to load Paystack. Please try again.");

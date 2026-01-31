@@ -180,5 +180,34 @@ class PaystackService {
 // Export singleton instance
 export const paystackService = new PaystackService();
 
+// ============================================================================
+// SIMPLIFIED API FOR COMPONENTS
+// ============================================================================
+
+/**
+ * Simplified payment initialization function for components
+ * This is the recommended way to integrate Paystack in UI components
+ * 
+ * @param params - Payment parameters
+ * @returns Promise that resolves when payment popup is opened
+ */
+export async function initiatePaystackPayment(params: {
+  email: string;
+  amount: number; // Amount in Naira (will be converted to kobo automatically)
+  reference: string;
+  metadata?: Record<string, any>;
+  onSuccess?: (response: PaystackResponse) => void;
+  onClose?: () => void;
+}): Promise<void> {
+  return paystackService.initializePayment({
+    email: params.email,
+    amount: paystackService.toKobo(params.amount),
+    reference: params.reference,
+    metadata: params.metadata,
+    onSuccess: params.onSuccess,
+    onClose: params.onClose,
+  });
+}
+
 // Export types
 export type { PaystackResponse, PaystackPopupData };
