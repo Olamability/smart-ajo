@@ -51,10 +51,6 @@ export const PaystackPaymentBreakdown: React.FC<PaymentBreakdownProps> = ({
     try {
       // Load Paystack script from CDN
       await loadPaystackScriptFromCDN();
-      
-      if (!window.PaystackPop) {
-        throw new Error('Paystack script not available');
-      }
 
       // @ts-ignore
       const handler = window.PaystackPop.setup({
