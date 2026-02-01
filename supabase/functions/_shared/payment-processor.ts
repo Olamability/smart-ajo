@@ -63,8 +63,8 @@ export async function createPaymentTransactions(
         amount: securityDepositAmount,
         status: 'completed',
         reference: `${reference}_SD`,
-        description: isCreator 
-          ? 'Security deposit for group creation' 
+        description: isCreator
+          ? 'Security deposit for group creation'
           : 'Security deposit for joining group',
         completed_at: new Date().toISOString(),
       },
@@ -84,7 +84,7 @@ export async function createPaymentTransactions(
     console.error('[Payment Processor] Failed to create transactions:', error);
     return false;
   }
-  
+
   console.log('[Payment Processor] Transaction records created');
   return true;
 }
@@ -196,8 +196,8 @@ export async function processGroupCreationPayment(
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
-  const preferredSlot = metadata?.preferred_slot 
-    ? parseInt(String(metadata.preferred_slot), 10) 
+  const preferredSlot = metadata?.preferred_slot
+    ? parseInt(String(metadata.preferred_slot), 10)
     : 1;
 
   if (!userId || !groupId) {
@@ -255,7 +255,7 @@ export async function processGroupCreationPayment(
   if (!existingMember) {
     // Add creator as member
     console.log('[Payment Processor] Adding creator as member with slot:', preferredSlot);
-    
+
     const { data: addMemberResult, error: addMemberError } = await supabase
       .rpc('add_member_to_group', {
         p_group_id: groupId,
@@ -275,7 +275,7 @@ export async function processGroupCreationPayment(
         console.error('[Payment Processor] add_member_to_group failed:', result.error_message);
         return { success: false, message: result.error_message || 'Failed to add creator' };
       }
-      memberPosition = result.position || preferredSlot;
+      memberPosition = result.member_position || preferredSlot;
     }
 
     // Update payment status
@@ -430,8 +430,8 @@ export async function processGroupJoinPayment(
 
   const userId = metadata?.user_id;
   const groupId = metadata?.group_id;
-  const preferredSlot = metadata?.preferred_slot 
-    ? parseInt(String(metadata.preferred_slot), 10) 
+  const preferredSlot = metadata?.preferred_slot
+    ? parseInt(String(metadata.preferred_slot), 10)
     : null;
 
   if (!userId || !groupId) {
@@ -503,7 +503,7 @@ export async function processGroupJoinPayment(
   } else {
     // Add user as new member
     console.log('[Payment Processor] Adding user as new member');
-    
+
     // Get preferred slot from join request if not in metadata
     let slotToAssign = preferredSlot;
     if (!slotToAssign) {
@@ -514,11 +514,14 @@ export async function processGroupJoinPayment(
         .eq('user_id', userId)
         .eq('status', 'approved')
         .maybeSingle();
-      
+
       slotToAssign = joinRequest?.preferred_slot || null;
     }
-    
-    const { data: addMemberResult, error: addMemberError } = await supabase
+
+    // ATTEMPT 1: Try with preferred slot (or null for next available)
+    console.log(`[Payment Processor] Attempting to assign slot ${slotToAssign}`);
+    // eslint-disable-next-line
+    let { data: addMemberResult, error: addMemberError } = await supabase
       .rpc('add_member_to_group', {
         p_group_id: groupId,
         p_user_id: userId,
@@ -526,23 +529,45 @@ export async function processGroupJoinPayment(
         p_preferred_slot: slotToAssign,
       });
 
+    // Handle initial failure
+    if (addMemberError || !addMemberResult || addMemberResult.length === 0 || !addMemberResult[0].success) {
+      const errorMessage = addMemberError?.message || addMemberResult?.[0]?.error_message || 'Unknown error';
+      console.warn(`[Payment Processor] Failed to assign slot ${slotToAssign}:`, errorMessage);
+
+      // FALLBACK: Try without preferred slot (auto-assign next available)
+      // Only if we tried a specific slot and it failed
+      if (slotToAssign !== null) {
+        console.log('[Payment Processor] Retrying with auto-assigned slot...');
+        const { data: retryResult, error: retryError } = await supabase
+          .rpc('add_member_to_group', {
+            p_group_id: groupId,
+            p_user_id: userId,
+            p_is_creator: false,
+            p_preferred_slot: null, // Let DB pick next available
+          });
+
+        addMemberResult = retryResult;
+        addMemberError = retryError;
+      }
+    }
+
     if (addMemberError) {
       console.error('[Payment Processor] Failed to add member:', addMemberError);
-      return { success: false, message: 'Failed to add user to group' };
+      return { success: false, message: 'Failed to add user to group: ' + addMemberError.message };
     }
 
     if (!addMemberResult || !Array.isArray(addMemberResult) || addMemberResult.length === 0) {
       console.error('[Payment Processor] add_member_to_group returned no result');
-      return { success: false, message: 'Failed to add user to group' };
+      return { success: false, message: 'Failed to add user to group (no result)' };
     }
-    
+
     const result = addMemberResult[0];
     if (!result.success) {
       console.error('[Payment Processor] add_member_to_group failed:', result.error_message);
       return { success: false, message: result.error_message || 'Failed to add user' };
     }
 
-    memberPosition = result.position;
+    memberPosition = result.member_position;
 
     // Update payment status
     const { error: memberError } = await supabase
@@ -715,9 +740,9 @@ export async function processContributionPayment(
   // Check if already paid (idempotency)
   if (contribution.status === 'paid') {
     console.log('[Payment Processor] Contribution already paid (idempotent)');
-    return { 
-      success: true, 
-      message: 'Contribution already processed' 
+    return {
+      success: true,
+      message: 'Contribution already processed'
     };
   }
 
