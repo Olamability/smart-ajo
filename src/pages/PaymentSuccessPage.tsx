@@ -49,29 +49,40 @@
  * ❌ Determining if payment was successful (backend only)
  * ❌ Updating database or business logic (backend only)
  * ❌ Trusting payment status from URL parameters (security risk)
- * ❌ Polling or waiting for payment state (backend handles synchronously)
  * 
- * Flow:
+ * Flow (with Realtime updates):
  * 1. User completes payment on Paystack
  * 2. Paystack redirects to this page with reference in URL
- * 3. Page calls verifyPayment() which invokes backend Edge Function
- * 4. Backend verifies with Paystack API, updates DB, executes business logic
- * 5. Page displays result from backend
- * 6. User navigates to group/dashboard
+ * 3. Page subscribes to Realtime updates for payment record
+ * 4. Page calls verifyPayment() which invokes backend Edge Function
+ * 5. Backend verifies with Paystack API, updates DB, executes business logic
+ * 6. If synchronous verification succeeds → display success
+ * 7. If synchronous verification fails (e.g., auth expired):
+ *    - Payment record is stored by backend
+ *    - Webhook processes payment asynchronously
+ *    - Realtime subscription receives update
+ *    - Page automatically updates with success
+ * 8. User navigates to group/dashboard
+ * 
+ * Fallback: If Realtime fails, polling mechanism checks payment status
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle2, CreditCard, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { verifyPayment } from '@/api/payments';
+import { verifyPayment, getPaymentStatus } from '@/api/payments';
+import { createClient } from '@/lib/client/supabase';
 import { toast } from 'sonner';
 
-type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed' | 'session_expired';
+type VerificationStatus = 'idle' | 'verifying' | 'verified' | 'failed' | 'session_expired' | 'waiting_webhook';
 
 const DEFAULT_VERIFYING_MESSAGE = 'Please wait while we verify your payment and process your membership...';
+const WEBHOOK_WAIT_MESSAGE = 'Payment verified! Waiting for membership activation...';
+const POLLING_INTERVAL_MS = 3000; // Poll every 3 seconds
+const MAX_POLLING_ATTEMPTS = 20; // Poll for up to 60 seconds
 const MAX_REFRESH_ATTEMPTS = 2; // Limit refresh attempts to prevent infinite loops
 const REFRESH_ATTEMPT_KEY = 'payment_refresh_attempts';
 
@@ -81,6 +92,10 @@ export default function PaymentSuccessPage() {
   const [verificationStatus, setVerificationStatus] = useState<VerificationStatus>('idle');
   const [verificationMessage, setVerificationMessage] = useState('');
   const [memberPosition, setMemberPosition] = useState<number | null>(null);
+  const [isListeningRealtime, setIsListeningRealtime] = useState(false);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingAttemptsRef = useRef(0);
+  const realtimeChannelRef = useRef<any>(null);
   
   // Get payment reference from URL
   // Paystack may send either 'reference' or 'trxref'
@@ -101,6 +116,200 @@ export default function PaymentSuccessPage() {
   const clearRefreshAttempts = useCallback(() => {
     sessionStorage.removeItem(REFRESH_ATTEMPT_KEY);
   }, []);
+
+  // Cleanup function for polling and realtime
+  const cleanup = useCallback(() => {
+    // Clear polling timeout
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
+    
+    // Unsubscribe from Realtime channel
+    if (realtimeChannelRef.current) {
+      console.log('[Payment Success] Unsubscribing from Realtime channel');
+      realtimeChannelRef.current.unsubscribe();
+      realtimeChannelRef.current = null;
+    }
+  }, []); // No dependencies needed - refs are stable
+
+  /**
+   * Setup Realtime subscription to listen for payment updates
+   * This allows the page to automatically update when webhook processes payment
+   */
+  const setupRealtimeSubscription = useCallback(() => {
+    if (!reference || isListeningRealtime) {
+      return;
+    }
+
+    console.log('[Payment Success] Setting up Realtime subscription for reference:', reference);
+    
+    try {
+      const supabase = createClient();
+      
+      // Subscribe to payment updates
+      const channel = supabase
+        .channel(`payment-${reference}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'payments',
+            filter: `reference=eq.${reference}`,
+          },
+          (payload) => {
+            console.log('[Payment Success] Realtime payment update received:', payload);
+            
+            const updatedPayment = payload.new;
+            
+            // Check if payment is now verified
+            if (updatedPayment.verified && updatedPayment.status === 'success') {
+              console.log('[Payment Success] Payment verified via Realtime!');
+              
+              // Check membership activation by querying group_members
+              const checkMembershipActivation = async () => {
+                const userId = updatedPayment.user_id;
+                const metadata = updatedPayment.metadata;
+                const groupIdFromPayment = metadata?.group_id;
+                
+                if (!userId || !groupIdFromPayment) {
+                  console.warn('[Payment Success] Missing userId or groupId in payment metadata', {
+                    userId,
+                    groupIdFromPayment,
+                    metadata
+                  });
+                  // Payment is verified but can't check membership
+                  // This is not an error - webhook will still process correctly
+                  // Just update status to show payment is verified
+                  cleanup();
+                  setVerificationStatus('verified');
+                  setVerificationMessage('Payment verified! Please check your membership status.');
+                  toast.success('Payment verified!');
+                  clearRefreshAttempts();
+                  return;
+                }
+                
+                const { data: member } = await supabase
+                    .from('group_members')
+                    .select('position, has_paid_security_deposit, status')
+                    .eq('user_id', userId)
+                    .eq('group_id', groupIdFromPayment)
+                    .maybeSingle();
+                  
+                  console.log('[Payment Success] Member status:', member);
+                  
+                  if (member?.has_paid_security_deposit && member?.status === 'active') {
+                    console.log('[Payment Success] Membership activated! Position:', member.position);
+                    cleanup();
+                    setVerificationStatus('verified');
+                    setMemberPosition(member.position);
+                    setVerificationMessage('Payment verified and membership activated!');
+                    toast.success('Payment verified! Your membership is now active.');
+                    clearRefreshAttempts();
+                  }
+              };
+              
+              checkMembershipActivation();
+            }
+          }
+        )
+        .subscribe((status) => {
+          console.log('[Payment Success] Realtime subscription status:', status);
+          
+          if (status === 'SUBSCRIBED') {
+            console.log('[Payment Success] Successfully subscribed to Realtime updates');
+            setIsListeningRealtime(true);
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn('[Payment Success] Realtime subscription failed, falling back to polling');
+            setIsListeningRealtime(false);
+            // Fallback to polling
+            startPolling();
+          }
+        });
+      
+      realtimeChannelRef.current = channel;
+    } catch (error) {
+      console.error('[Payment Success] Failed to setup Realtime subscription:', error);
+      // Fallback to polling
+      startPolling();
+    }
+  }, [reference, isListeningRealtime]); // Removed cleanup and clearRefreshAttempts from deps
+
+  /**
+   * Polling fallback mechanism
+   * Polls payment status every few seconds if Realtime is unavailable
+   */
+  const pollPaymentStatus = useCallback(async () => {
+    if (!reference) return;
+    
+    pollingAttemptsRef.current += 1;
+    console.log(`[Payment Success] Polling attempt ${pollingAttemptsRef.current}/${MAX_POLLING_ATTEMPTS}`);
+    
+    try {
+      const result = await getPaymentStatus(reference);
+      
+      if (result.success && result.payment) {
+        console.log('[Payment Success] Poll result:', result.payment);
+        
+        // Check if payment is verified
+        if (result.payment.verified && result.payment.status === 'success') {
+          console.log('[Payment Success] Payment verified via polling!');
+          
+          // Check membership activation
+          const supabase = createClient();
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          if (user && groupId) {
+            const { data: member } = await supabase
+              .from('group_members')
+              .select('position, has_paid_security_deposit, status')
+              .eq('user_id', user.id)
+              .eq('group_id', groupId)
+              .maybeSingle();
+            
+            console.log('[Payment Success] Member status:', member);
+            
+            if (member?.has_paid_security_deposit && member?.status === 'active') {
+              console.log('[Payment Success] Membership activated! Position:', member.position);
+              cleanup();
+              setVerificationStatus('verified');
+              setMemberPosition(member.position);
+              setVerificationMessage('Payment verified and membership activated!');
+              toast.success('Payment verified! Your membership is now active.');
+              clearRefreshAttempts();
+              return; // Stop polling
+            }
+          }
+        }
+      }
+      
+      // Continue polling if not verified yet and haven't exceeded max attempts
+      if (pollingAttemptsRef.current < MAX_POLLING_ATTEMPTS) {
+        pollingTimeoutRef.current = setTimeout(() => {
+          pollPaymentStatus();
+        }, POLLING_INTERVAL_MS);
+      } else {
+        console.warn('[Payment Success] Max polling attempts reached');
+        setVerificationMessage('Payment verification is taking longer than expected. Your payment will be processed automatically. Please check back in a few minutes.');
+      }
+    } catch (error) {
+      console.error('[Payment Success] Polling error:', error);
+      
+      // Retry polling if not exceeded max attempts
+      if (pollingAttemptsRef.current < MAX_POLLING_ATTEMPTS) {
+        pollingTimeoutRef.current = setTimeout(() => {
+          pollPaymentStatus();
+        }, POLLING_INTERVAL_MS);
+      }
+    }
+  }, [reference, groupId, cleanup, clearRefreshAttempts]);
+
+  const startPolling = useCallback(() => {
+    console.log('[Payment Success] Starting polling mechanism');
+    pollingAttemptsRef.current = 0;
+    pollPaymentStatus();
+  }, [pollPaymentStatus]);
 
   const handleVerifyPayment = useCallback(async () => {
     if (!reference) {
@@ -129,6 +338,9 @@ export default function PaymentSuccessPage() {
     console.log('[Payment Success] Group ID:', groupId);
     console.log('[Payment Success] Timestamp:', new Date().toISOString());
 
+    // Setup Realtime subscription to listen for updates
+    setupRealtimeSubscription();
+
     try {
       // Call backend verify-payment Edge Function
       // This verifies with Paystack, stores payment, AND executes business logic
@@ -151,8 +363,9 @@ export default function PaymentSuccessPage() {
           console.log('[Payment Success] Assigned position:', result.position);
         }
         
-        // Clear refresh attempts on success
+        // Clear refresh attempts and cleanup
         clearRefreshAttempts();
+        cleanup();
         
         setVerificationStatus('verified');
         setVerificationMessage(
@@ -161,40 +374,23 @@ export default function PaymentSuccessPage() {
         setMemberPosition(result.position || null);
         toast.success('Payment verified! Your membership is active.');
       } else if (result.verified && result.payment_status === 'verified_pending_activation') {
-        // Payment verified but authentication expired, needs refresh
-        console.log('[Payment Success] PENDING: Payment verified, checking refresh attempts...');
+        // Payment verified but authentication expired
+        // Instead of auto-refresh, wait for webhook + Realtime/polling
+        console.log('[Payment Success] PENDING: Payment verified, waiting for webhook activation...');
         
-        const attempts = getRefreshAttempts();
-        console.log('[Payment Success] Refresh attempts:', attempts);
+        setVerificationStatus('waiting_webhook');
+        setVerificationMessage(WEBHOOK_WAIT_MESSAGE);
+        toast.info('Payment verified! Activating membership...');
         
-        if (attempts < MAX_REFRESH_ATTEMPTS) {
-          // Auto-refresh with incremented counter
-          console.log('[Payment Success] Auto-refreshing page for activation');
-          setVerificationStatus('verifying');
-          setVerificationMessage('Payment verified! Refreshing to complete activation...');
-          toast.info('Payment verified! Refreshing to activate membership...');
-          
-          incrementRefreshAttempts();
-          
-          // Auto-refresh after 2 seconds
-          setTimeout(() => {
-            window.location.reload();
-          }, 2000);
-        } else {
-          // Max attempts reached, ask user to log in
-          console.warn('[Payment Success] Max refresh attempts reached');
-          setVerificationStatus('session_expired');
-          setVerificationMessage(
-            'Payment verified successfully, but your session has expired. Please log in again to complete activation. Your payment is safe and will be activated automatically within a few minutes.'
-          );
-          toast.error('Session expired. Please log in again to complete activation.');
-          clearRefreshAttempts();
-        }
+        // Realtime subscription is already active
+        // If Realtime fails, polling will be started automatically
       } else {
         // Verification failed or pending
         console.error('[Payment Success] ERROR: Verification failed');
         console.error('[Payment Success] Status:', result.payment_status);
         console.error('[Payment Success] Error:', result.error || result.message);
+        
+        cleanup(); // Stop listening since verification failed
         
         if (result.payment_status === 'unauthorized') {
           setVerificationStatus('failed');
@@ -213,20 +409,26 @@ export default function PaymentSuccessPage() {
     } catch (error) {
       console.error('[Payment Success] ERROR: Exception during verification');
       console.error('[Payment Success] Error:', error);
+      cleanup();
       setVerificationStatus('failed');
       setVerificationMessage('Failed to verify payment. Please contact support.');
       toast.error('Failed to verify payment');
     } finally {
       console.log('=== PAYMENT VERIFICATION END ===');
     }
-  }, [reference, groupId]);
+  }, [reference, groupId, setupRealtimeSubscription]); // Removed cleanup and clearRefreshAttempts from deps
 
   useEffect(() => {
     // Auto-verify when reference is available
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
-  }, [reference, verificationStatus, handleVerifyPayment]);
+    
+    // Cleanup on unmount
+    return () => {
+      cleanup();
+    };
+  }, [reference, verificationStatus, handleVerifyPayment, cleanup]);
 
   const handleNavigation = () => {
     // Navigate to group page if group ID provided, otherwise dashboard
@@ -249,6 +451,8 @@ export default function PaymentSuccessPage() {
           <CardTitle className="text-2xl text-center">
             {verificationStatus === 'verified' 
               ? 'Payment Verified' 
+              : verificationStatus === 'waiting_webhook'
+              ? 'Activating Membership'
               : 'Payment Received'}
           </CardTitle>
           <CardDescription className="text-center">
@@ -256,12 +460,14 @@ export default function PaymentSuccessPage() {
               ? 'Verifying your payment...' 
               : verificationStatus === 'verified'
               ? 'Your payment has been successfully verified.'
+              : verificationStatus === 'waiting_webhook'
+              ? 'Payment verified. Activating your membership...'
               : 'Your payment has been received.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-4">
           {/* Status Icon */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || verificationStatus === 'waiting_webhook') && (
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
           )}
           {verificationStatus === 'verified' && (
@@ -278,14 +484,27 @@ export default function PaymentSuccessPage() {
           )}
 
           {/* Status Message */}
-          {verificationStatus === 'verifying' && (
+          {(verificationStatus === 'verifying' || verificationStatus === 'waiting_webhook') && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground text-center">
-                {verificationMessage || DEFAULT_VERIFYING_MESSAGE}
+                {verificationMessage || (
+                  verificationStatus === 'waiting_webhook' 
+                    ? WEBHOOK_WAIT_MESSAGE 
+                    : DEFAULT_VERIFYING_MESSAGE
+                )}
               </p>
               <p className="text-xs text-muted-foreground text-center">
-                <span className="inline-block mr-1" role="img" aria-label="lock">🔐</span>
-                Securely verifying your payment with our backend...
+                {verificationStatus === 'waiting_webhook' ? (
+                  <>
+                    <span className="inline-block mr-1" role="img" aria-label="clock">⏳</span>
+                    This usually takes just a few seconds...
+                  </>
+                ) : (
+                  <>
+                    <span className="inline-block mr-1" role="img" aria-label="lock">🔐</span>
+                    Securely verifying your payment with our backend...
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -386,7 +605,7 @@ export default function PaymentSuccessPage() {
             <Button
               className="flex-1"
               onClick={handleNavigation}
-              disabled={verificationStatus === 'verifying'}
+              disabled={verificationStatus === 'verifying' || verificationStatus === 'waiting_webhook'}
             >
               {groupId ? 'Go to Group' : 'Go to Dashboard'}
             </Button>
