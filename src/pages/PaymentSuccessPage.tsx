@@ -131,7 +131,7 @@ export default function PaymentSuccessPage() {
       realtimeChannelRef.current.unsubscribe();
       realtimeChannelRef.current = null;
     }
-  }, []);
+  }, []); // No dependencies needed - refs are stable
 
   /**
    * Setup Realtime subscription to listen for payment updates
@@ -173,8 +173,24 @@ export default function PaymentSuccessPage() {
                 const metadata = updatedPayment.metadata;
                 const groupIdFromPayment = metadata?.group_id;
                 
-                if (userId && groupIdFromPayment) {
-                  const { data: member } = await supabase
+                if (!userId || !groupIdFromPayment) {
+                  console.warn('[Payment Success] Missing userId or groupId in payment metadata', {
+                    userId,
+                    groupIdFromPayment,
+                    metadata
+                  });
+                  // Payment is verified but can't check membership
+                  // This is not an error - webhook will still process correctly
+                  // Just update status to show payment is verified
+                  cleanup();
+                  setVerificationStatus('verified');
+                  setVerificationMessage('Payment verified! Please check your membership status.');
+                  toast.success('Payment verified!');
+                  clearRefreshAttempts();
+                  return;
+                }
+                
+                const { data: member } = await supabase
                     .from('group_members')
                     .select('position, has_paid_security_deposit, status')
                     .eq('user_id', userId)
@@ -192,7 +208,6 @@ export default function PaymentSuccessPage() {
                     toast.success('Payment verified! Your membership is now active.');
                     clearRefreshAttempts();
                   }
-                }
               };
               
               checkMembershipActivation();
@@ -219,7 +234,7 @@ export default function PaymentSuccessPage() {
       // Fallback to polling
       startPolling();
     }
-  }, [reference, isListeningRealtime, cleanup, clearRefreshAttempts]);
+  }, [reference, isListeningRealtime]); // Removed cleanup and clearRefreshAttempts from deps
 
   /**
    * Polling fallback mechanism
@@ -401,7 +416,7 @@ export default function PaymentSuccessPage() {
     } finally {
       console.log('=== PAYMENT VERIFICATION END ===');
     }
-  }, [reference, groupId, setupRealtimeSubscription, cleanup, clearRefreshAttempts]);
+  }, [reference, groupId, setupRealtimeSubscription]); // Removed cleanup and clearRefreshAttempts from deps
 
   useEffect(() => {
     // Auto-verify when reference is available
