@@ -246,10 +246,10 @@ async function verifyWithPaystack(
   secretKey: string
 ): Promise<PaystackVerificationResponse> {
   console.log('[Paystack API] Verifying payment:', reference);
-  
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-  
+
   try {
     const response = await fetch(
       `https://api.paystack.co/transaction/verify/${reference}`,
@@ -285,12 +285,12 @@ async function verifyWithPaystack(
     return result;
   } catch (error) {
     clearTimeout(timeoutId);
-    
+
     if (error.name === 'AbortError') {
       console.error('[Paystack API] Request timed out');
       throw new Error('Payment verification timed out. Please try again.');
     }
-    
+
     throw error;
   }
 }
@@ -305,7 +305,7 @@ async function storePaymentRecord(
 ): Promise<{ success: boolean; message: string }> {
   console.log('[Payment Store] Storing payment:', paystackData.reference);
   console.log('[Payment Store] Status:', paystackData.status);
-  
+
   const paymentData = {
     reference: paystackData.reference,
     user_id: paystackData.metadata?.user_id,
@@ -364,7 +364,7 @@ async function storePaymentRecord(
         message: 'Failed to update payment record',
       };
     }
-    
+
     console.log('[Payment Store] Payment updated');
   } else {
     // Insert new record
@@ -379,7 +379,7 @@ async function storePaymentRecord(
         message: 'Failed to create payment record',
       };
     }
-    
+
     console.log('[Payment Store] Payment created');
   }
 
@@ -396,25 +396,25 @@ async function storePaymentRecord(
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { 
+    return new Response(null, {
       status: 204,
-      headers: corsHeaders 
+      headers: corsHeaders
     });
   }
 
   try {
     console.log('=== PAYMENT VERIFICATION START ===');
     console.log('Timestamp:', new Date().toISOString());
-    
+
     // Get environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
-    
+
     console.log('[Config] Supabase URL configured:', !!supabaseUrl);
     console.log('[Config] Paystack secret configured:', !!paystackSecret);
-    
+
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey || !paystackSecret) {
       console.error('[Config] Missing required environment variables');
       return new Response(
@@ -452,7 +452,7 @@ serve(async (req) => {
       verificationResponse = await verifyWithPaystack(reference, paystackSecret);
     } catch (error) {
       console.error('[Verification] Paystack verification failed:', error.message);
-      
+
       return new Response(
         JSON.stringify({
           success: false,
@@ -493,7 +493,7 @@ serve(async (req) => {
     // Step 2: Store payment record
     console.log('[Verification] Storing payment record...');
     const storeResult = await storePaymentRecord(supabase, verificationResponse.data);
-    
+
     if (!storeResult.success) {
       console.error('[Verification] Failed to store payment:', storeResult.message);
       return new Response(
@@ -517,15 +517,15 @@ serve(async (req) => {
     // But BEFORE business logic to ensure only authenticated users can activate memberships
     const authHeader = req.headers.get('Authorization');
     console.log('[Auth] Authorization header present:', !!authHeader);
-    
+
     let user = null;
     let authError = null;
-    
+
     if (authHeader) {
       // Validate JWT format
       const jwt = authHeader.replace('Bearer ', '');
       console.log('[Auth] JWT length:', jwt.length);
-      
+
       if (jwt && jwt.length >= 20 && jwt.split('.').length === 3) {
         // Create auth client with user JWT
         const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
@@ -535,18 +535,18 @@ serve(async (req) => {
             },
           },
         });
-        
+
         // Verify user
         console.log('[Auth] Verifying user...');
         const authResult = await supabaseAuth.auth.getUser();
         user = authResult.data?.user || null;
         authError = authResult.error;
-        
+
         if (authError || !user) {
           console.error('[Auth] User verification failed:', authError?.message);
         } else {
           console.log('[Auth] User authenticated:', user.id);
-          
+
           // Verify the authenticated user matches the payment user
           const paymentUserId = verificationResponse.data.metadata?.user_id;
           if (paymentUserId && user.id !== paymentUserId) {
@@ -566,12 +566,12 @@ serve(async (req) => {
 
     // Step 4: Execute business logic for successful payments (only if authenticated)
     let businessLogicResult: { success: boolean; message: string; position?: number } | null = null;
-    
+
     // Handle failed payments early
     if (verificationResponse.data.status !== 'success') {
       console.log('[Verification] Payment not successful:', verificationResponse.data.status);
       console.log('=== PAYMENT VERIFICATION END ===');
-      
+
       return new Response(
         JSON.stringify({
           success: false,
@@ -593,19 +593,19 @@ serve(async (req) => {
         }
       );
     }
-    
+
     // Payment successful - process business logic
     console.log('[Business Logic] Payment successful, checking authentication for business logic...');
     const paymentType = verificationResponse.data.metadata?.type;
-    
+
     console.log('[Business Logic] Payment type:', paymentType);
-    
+
     // Check if user is authenticated
     if (!user || authError) {
       console.warn('[Business Logic] User not authenticated, skipping business logic');
       console.warn('[Business Logic] Auth error:', authError?.message);
       console.log('[Business Logic] Payment stored. Webhook will process business logic.');
-      
+
       // Payment is stored but business logic needs authentication
       // Return success with message to refresh
       return new Response(
@@ -631,7 +631,7 @@ serve(async (req) => {
         }
       );
     }
-    
+
     // THIS IS WHERE MEMBERSHIP GETS ACTIVATED!
     // ========================================
     // Based on payment type, we execute different business logic:
@@ -642,7 +642,7 @@ serve(async (req) => {
     // 
     // All operations are idempotent - safe to call multiple times.
     // The webhook will also execute this logic as a backup.
-    
+
     try {
       if (paymentType === 'group_creation') {
         // CREATOR PAYMENT: Add creator as first member
@@ -664,9 +664,9 @@ serve(async (req) => {
         console.log('[Business Logic] Result:', businessLogicResult.success ? 'SUCCESS' : 'FAILED');
       } else {
         console.warn('[Business Logic] Unknown payment type:', paymentType);
-        businessLogicResult = { 
-          success: true, 
-          message: 'Payment verified. Type-specific processing will be handled by webhook.' 
+        businessLogicResult = {
+          success: true,
+          message: 'Payment verified. Type-specific processing will be handled by webhook.'
         };
       }
 
@@ -680,6 +680,11 @@ serve(async (req) => {
             amount: verificationResponse.data.amount,
             message: `Payment verified but failed to process: ${businessLogicResult.message}. Your payment will be activated automatically within a few minutes.`,
             error: businessLogicResult.message,
+            // Include debug info if available
+            debug: {
+              step: 'business_logic',
+              details: businessLogicResult
+            }
           }),
           {
             status: 400,
@@ -704,7 +709,7 @@ serve(async (req) => {
         }
       );
     }
-    
+
     console.log('[Business Logic] Execution complete:', businessLogicResult?.success ? 'SUCCESS' : 'PENDING');
 
     console.log('[Verification] Payment verified and processed successfully');
@@ -736,7 +741,7 @@ serve(async (req) => {
     console.error('=== VERIFICATION ERROR ===');
     console.error('Error:', error.message);
     console.error('=== END ERROR ===');
-    
+
     return new Response(
       JSON.stringify({
         success: false,
