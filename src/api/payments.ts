@@ -157,7 +157,7 @@ export async function initializeGroupCreationPayment(
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       return { success: false, error: 'Authentication required' };
     }
@@ -223,7 +223,7 @@ export async function initializeGroupJoinPayment(
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       return { success: false, error: 'Authentication required' };
     }
@@ -244,7 +244,7 @@ export async function initializeGroupJoinPayment(
         .eq('user_id', user.id)
         .eq('status', 'approved')
         .maybeSingle();
-      
+
       slotToUse = joinRequest?.preferred_slot || DEFAULT_PREFERRED_SLOT;
     }
 
@@ -303,7 +303,7 @@ export async function initializeContributionPayment(
   try {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    
+
     if (!user) {
       return { success: false, error: 'Authentication required' };
     }
@@ -409,7 +409,7 @@ export async function verifyPayment(
   delayMs: number = VERIFICATION_DELAY_MS
 ): Promise<PaymentVerificationResult> {
   console.log('[Payment Verify] Starting verification for:', reference);
-  
+
   // Validate reference format
   if (!reference || typeof reference !== 'string' || reference.trim().length === 0) {
     console.error('[Payment Verify] Invalid reference format:', reference);
@@ -422,13 +422,13 @@ export async function verifyPayment(
       error: 'Payment reference is required and must be a non-empty string',
     };
   }
-  
+
   const supabase = createClient();
-  
+
   // Proactively refresh session to ensure valid token
   console.log('[Payment Verify] Refreshing session...');
   const { data: { session: currentSession } } = await supabase.auth.getSession();
-  
+
   if (!currentSession?.access_token) {
     console.error('[Payment Verify] No active session');
     return {
@@ -440,15 +440,15 @@ export async function verifyPayment(
       error: 'No active session',
     };
   }
-  
+
   // Try to refresh session
   const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-  
+
   let activeSession = currentSession;
-  
+
   if (refreshError || !refreshData.session) {
     console.warn('[Payment Verify] Session refresh failed, checking current session validity');
-    
+
     if (isSessionExpired(currentSession)) {
       console.error('[Payment Verify] Current session expired and refresh failed');
       return {
@@ -460,12 +460,12 @@ export async function verifyPayment(
         error: 'Session expired',
       };
     }
-    
+
     console.log('[Payment Verify] Current session still valid');
   } else {
     console.log('[Payment Verify] Session refreshed successfully');
     activeSession = refreshData.session;
-    
+
     if (isSessionExpired(activeSession)) {
       console.error('[Payment Verify] Refreshed session already expired');
       return {
@@ -478,10 +478,10 @@ export async function verifyPayment(
       };
     }
   }
-  
+
   // Verify user with active session
   const { data: { user }, error: userError } = await supabase.auth.getUser(activeSession.access_token);
-  
+
   if (userError || !user) {
     console.error('[Payment Verify] User authentication failed:', userError?.message);
     return {
@@ -493,43 +493,47 @@ export async function verifyPayment(
       error: userError?.message || 'No authenticated user',
     };
   }
-  
+
   console.log('[Payment Verify] User authenticated successfully');
-  
+
   // Retry loop for verification
   let lastError = '';
-  
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       console.log(`[Payment Verify] Attempt ${attempt}/${retries}`);
-      
+
       // Wait before retry (not on first attempt)
       if (attempt > 1) {
         const waitTime = delayMs * attempt; // Exponential backoff
         console.log(`[Payment Verify] Waiting ${waitTime}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
-      
+
       // Call verify-payment Edge Function
-      // Use the same client that called refreshSession() to ensure the refreshed access token is used
-      // Creating a new client here would not have the updated session in its Authorization header
+      // Explicitly pass the token from the ACTIVE session to ensure it's not stale
+      const currentToken = activeSession.access_token;
+
       const { data, error } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
+        headers: {
+          Authorization: `Bearer ${currentToken}`
+        }
       });
-      
+
       console.log('[Payment Verify] Edge Function response:', {
         hasData: !!data,
         hasError: !!error,
         status: data?.payment_status,
       });
-      
+
       if (error) {
         console.error('[Payment Verify] Edge Function error:', error.message);
         lastError = error.message;
-        
+
         const errorContext = (error as any).context;
         const statusCode = errorContext?.status;
-        
+
         // Handle specific error types
         if (statusCode === 404 || error.message.includes('404')) {
           return {
@@ -541,7 +545,7 @@ export async function verifyPayment(
             error: 'Edge Function not deployed',
           };
         }
-        
+
         if (statusCode === 401 || error.message.includes('401') || error.message.includes('Unauthorized')) {
           return {
             success: false,
@@ -552,7 +556,7 @@ export async function verifyPayment(
             error: 'Authentication failed',
           };
         }
-        
+
         if (statusCode && statusCode >= 500) {
           if (attempt < retries) {
             console.log('[Payment Verify] Server error, will retry...');
@@ -567,7 +571,7 @@ export async function verifyPayment(
             error: `Server error: ${statusCode}`,
           };
         }
-        
+
         // Network errors - retry
         if (attempt < retries && (
           error.message.includes('timeout') ||
@@ -577,7 +581,7 @@ export async function verifyPayment(
           console.log('[Payment Verify] Network error, will retry...');
           continue;
         }
-        
+
         return {
           success: false,
           payment_status: 'unknown',
@@ -587,15 +591,15 @@ export async function verifyPayment(
           error: error.message,
         };
       }
-      
+
       if (!data) {
         console.error('[Payment Verify] No data returned');
         lastError = 'No response from verification service';
-        
+
         if (attempt < retries) {
           continue;
         }
-        
+
         return {
           success: false,
           payment_status: 'unknown',
@@ -605,12 +609,12 @@ export async function verifyPayment(
           error: lastError,
         };
       }
-      
+
       // Check for API-level errors
       if (data.error) {
         console.error('[Payment Verify] API error:', data.error);
         lastError = data.error;
-        
+
         // Retry if still processing
         if (attempt < retries && (
           data.payment_status === 'processing' ||
@@ -619,7 +623,7 @@ export async function verifyPayment(
           console.log('[Payment Verify] Payment still processing, will retry...');
           continue;
         }
-        
+
         return {
           success: false,
           payment_status: data.payment_status || 'unknown',
@@ -629,7 +633,7 @@ export async function verifyPayment(
           error: data.error,
         };
       }
-      
+
       // Success!
       console.log('[Payment Verify] Verification successful');
       return {
@@ -644,14 +648,14 @@ export async function verifyPayment(
     } catch (error) {
       console.error(`[Payment Verify] Exception on attempt ${attempt}:`, error);
       lastError = getErrorMessage(error, 'Verification failed');
-      
+
       if (attempt < retries) {
         console.log('[Payment Verify] Will retry after exception...');
         continue;
       }
     }
   }
-  
+
   // All retries exhausted
   console.error('[Payment Verify] All attempts failed. Last error:', lastError);
   return {
