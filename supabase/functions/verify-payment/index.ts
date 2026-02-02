@@ -463,7 +463,7 @@ serve(async (req) => {
           error: 'Payment verification failed',
         }),
         {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -481,7 +481,7 @@ serve(async (req) => {
           error: 'Invalid response from payment gateway',
         }),
         {
-          status: 400,
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -506,7 +506,7 @@ serve(async (req) => {
           error: storeResult.message,
         }),
         {
-          status: 500,
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -687,7 +687,7 @@ serve(async (req) => {
             }
           }),
           {
-            status: 400,
+            status: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           }
         );
@@ -704,7 +704,7 @@ serve(async (req) => {
           error: error.message || 'Business logic execution failed',
         }),
         {
-          status: 500,
+          status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       );
@@ -752,7 +752,7 @@ serve(async (req) => {
         error: 'Internal server error',
       }),
       {
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );
