@@ -96,7 +96,7 @@ export default function PaymentSuccessPage() {
   const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pollingAttemptsRef = useRef(0);
   const realtimeChannelRef = useRef<any>(null);
-  
+
   // Get payment reference from URL
   // Paystack may send either 'reference' or 'trxref'
   const reference = searchParams.get('reference') || searchParams.get('trxref');
@@ -124,7 +124,7 @@ export default function PaymentSuccessPage() {
       clearTimeout(pollingTimeoutRef.current);
       pollingTimeoutRef.current = null;
     }
-    
+
     // Unsubscribe from Realtime channel
     if (realtimeChannelRef.current) {
       console.log('[Payment Success] Unsubscribing from Realtime channel');
@@ -143,10 +143,10 @@ export default function PaymentSuccessPage() {
     }
 
     console.log('[Payment Success] Setting up Realtime subscription for reference:', reference);
-    
+
     try {
       const supabase = createClient();
-      
+
       // Subscribe to payment updates
       const channel = supabase
         .channel(`payment-${reference}`)
@@ -160,19 +160,19 @@ export default function PaymentSuccessPage() {
           },
           (payload) => {
             console.log('[Payment Success] Realtime payment update received:', payload);
-            
+
             const updatedPayment = payload.new;
-            
+
             // Check if payment is now verified
             if (updatedPayment.verified && updatedPayment.status === 'success') {
               console.log('[Payment Success] Payment verified via Realtime!');
-              
+
               // Check membership activation by querying group_members
               const checkMembershipActivation = async () => {
                 const userId = updatedPayment.user_id;
                 const metadata = updatedPayment.metadata;
                 const groupIdFromPayment = metadata?.group_id;
-                
+
                 if (!userId || !groupIdFromPayment) {
                   console.warn('[Payment Success] Missing userId or groupId in payment metadata', {
                     userId,
@@ -189,34 +189,34 @@ export default function PaymentSuccessPage() {
                   clearRefreshAttempts();
                   return;
                 }
-                
+
                 const { data: member } = await supabase
-                    .from('group_members')
-                    .select('position, has_paid_security_deposit, status')
-                    .eq('user_id', userId)
-                    .eq('group_id', groupIdFromPayment)
-                    .maybeSingle();
-                  
-                  console.log('[Payment Success] Member status:', member);
-                  
-                  if (member?.has_paid_security_deposit && member?.status === 'active') {
-                    console.log('[Payment Success] Membership activated! Position:', member.position);
-                    cleanup();
-                    setVerificationStatus('verified');
-                    setMemberPosition(member.position);
-                    setVerificationMessage('Payment verified and membership activated!');
-                    toast.success('Payment verified! Your membership is now active.');
-                    clearRefreshAttempts();
-                  }
+                  .from('group_members')
+                  .select('position, has_paid_security_deposit, status')
+                  .eq('user_id', userId)
+                  .eq('group_id', groupIdFromPayment)
+                  .maybeSingle();
+
+                console.log('[Payment Success] Member status:', member);
+
+                if (member?.has_paid_security_deposit && member?.status === 'active') {
+                  console.log('[Payment Success] Membership activated! Position:', member.position);
+                  cleanup();
+                  setVerificationStatus('verified');
+                  setMemberPosition(member.position);
+                  setVerificationMessage('Payment verified and membership activated!');
+                  toast.success('Payment verified! Your membership is now active.');
+                  clearRefreshAttempts();
+                }
               };
-              
+
               checkMembershipActivation();
             }
           }
         )
         .subscribe((status) => {
           console.log('[Payment Success] Realtime subscription status:', status);
-          
+
           if (status === 'SUBSCRIBED') {
             console.log('[Payment Success] Successfully subscribed to Realtime updates');
             setIsListeningRealtime(true);
@@ -227,7 +227,7 @@ export default function PaymentSuccessPage() {
             startPolling();
           }
         });
-      
+
       realtimeChannelRef.current = channel;
     } catch (error) {
       console.error('[Payment Success] Failed to setup Realtime subscription:', error);
@@ -242,24 +242,24 @@ export default function PaymentSuccessPage() {
    */
   const pollPaymentStatus = useCallback(async () => {
     if (!reference) return;
-    
+
     pollingAttemptsRef.current += 1;
     console.log(`[Payment Success] Polling attempt ${pollingAttemptsRef.current}/${MAX_POLLING_ATTEMPTS}`);
-    
+
     try {
       const result = await getPaymentStatus(reference);
-      
+
       if (result.success && result.payment) {
         console.log('[Payment Success] Poll result:', result.payment);
-        
+
         // Check if payment is verified
         if (result.payment.verified && result.payment.status === 'success') {
           console.log('[Payment Success] Payment verified via polling!');
-          
+
           // Check membership activation
           const supabase = createClient();
           const { data: { user } } = await supabase.auth.getUser();
-          
+
           if (user && groupId) {
             const { data: member } = await supabase
               .from('group_members')
@@ -267,9 +267,9 @@ export default function PaymentSuccessPage() {
               .eq('user_id', user.id)
               .eq('group_id', groupId)
               .maybeSingle();
-            
+
             console.log('[Payment Success] Member status:', member);
-            
+
             if (member?.has_paid_security_deposit && member?.status === 'active') {
               console.log('[Payment Success] Membership activated! Position:', member.position);
               cleanup();
@@ -283,7 +283,7 @@ export default function PaymentSuccessPage() {
           }
         }
       }
-      
+
       // Continue polling if not verified yet and haven't exceeded max attempts
       if (pollingAttemptsRef.current < MAX_POLLING_ATTEMPTS) {
         pollingTimeoutRef.current = setTimeout(() => {
@@ -295,7 +295,7 @@ export default function PaymentSuccessPage() {
       }
     } catch (error) {
       console.error('[Payment Success] Polling error:', error);
-      
+
       // Retry polling if not exceeded max attempts
       if (pollingAttemptsRef.current < MAX_POLLING_ATTEMPTS) {
         pollingTimeoutRef.current = setTimeout(() => {
@@ -332,7 +332,7 @@ export default function PaymentSuccessPage() {
 
     setVerificationStatus('verifying');
     setVerificationMessage(DEFAULT_VERIFYING_MESSAGE);
-    
+
     console.log('=== PAYMENT VERIFICATION START ===');
     console.log('[Payment Success] Reference:', reference);
     console.log('[Payment Success] Group ID:', groupId);
@@ -346,7 +346,7 @@ export default function PaymentSuccessPage() {
       // This verifies with Paystack, stores payment, AND executes business logic
       console.log('[Payment Success] Calling verifyPayment API...');
       const result = await verifyPayment(reference);
-      
+
       console.log('[Payment Success] Verification result:', {
         success: result.success,
         verified: result.verified,
@@ -354,7 +354,7 @@ export default function PaymentSuccessPage() {
         position: result.position,
         amount: result.amount,
       });
-      
+
       if (result.verified && result.success) {
         // Payment verified AND business logic completed
         console.log('[Payment Success] SUCCESS: Payment verified successfully');
@@ -362,11 +362,11 @@ export default function PaymentSuccessPage() {
         if (result.position) {
           console.log('[Payment Success] Assigned position:', result.position);
         }
-        
+
         // Clear refresh attempts and cleanup
         clearRefreshAttempts();
         cleanup();
-        
+
         setVerificationStatus('verified');
         setVerificationMessage(
           result.message || 'Payment verified successfully! Your membership is now active.'
@@ -377,11 +377,11 @@ export default function PaymentSuccessPage() {
         // Payment verified but authentication expired
         // Instead of auto-refresh, wait for webhook + Realtime/polling
         console.log('[Payment Success] PENDING: Payment verified, waiting for webhook activation...');
-        
+
         setVerificationStatus('waiting_webhook');
         setVerificationMessage(WEBHOOK_WAIT_MESSAGE);
         toast.info('Payment verified! Activating membership...');
-        
+
         // Realtime subscription is already active
         // If Realtime fails, polling will be started automatically
       } else {
@@ -389,15 +389,23 @@ export default function PaymentSuccessPage() {
         console.error('[Payment Success] ERROR: Verification failed');
         console.error('[Payment Success] Status:', result.payment_status);
         console.error('[Payment Success] Error:', result.error || result.message);
-        
+
         cleanup(); // Stop listening since verification failed
-        
+
         if (result.payment_status === 'unauthorized') {
-          setVerificationStatus('failed');
+          setVerificationStatus('session_expired');
           setVerificationMessage(
-            'Session expired. Please refresh the page to retry verification. Your payment was received.'
+            'Session expired. Redirecting to login...'
           );
-          toast.error('Session expired. Please refresh to retry.');
+          toast.error('Session expired. Redirecting to login...');
+
+          // Auto-redirect to login after short delay
+          setTimeout(() => {
+            sessionStorage.setItem('pending_payment_reference', reference || '');
+            sessionStorage.setItem('pending_payment_group', groupId || '');
+            // Force hard redirect to ensure clean state
+            window.location.href = `/login?redirect=/payment/success?reference=${reference}&group=${groupId}`;
+          }, 2000);
         } else {
           setVerificationStatus('failed');
           setVerificationMessage(
@@ -423,7 +431,7 @@ export default function PaymentSuccessPage() {
     if (reference && verificationStatus === 'idle') {
       handleVerifyPayment();
     }
-    
+
     // Cleanup on unmount
     return () => {
       cleanup();
@@ -449,20 +457,20 @@ export default function PaymentSuccessPage() {
             </div>
           </div>
           <CardTitle className="text-2xl text-center">
-            {verificationStatus === 'verified' 
-              ? 'Payment Verified' 
+            {verificationStatus === 'verified'
+              ? 'Payment Verified'
               : verificationStatus === 'waiting_webhook'
-              ? 'Activating Membership'
-              : 'Payment Received'}
+                ? 'Activating Membership'
+                : 'Payment Received'}
           </CardTitle>
           <CardDescription className="text-center">
-            {verificationStatus === 'verifying' 
-              ? 'Verifying your payment...' 
+            {verificationStatus === 'verifying'
+              ? 'Verifying your payment...'
               : verificationStatus === 'verified'
-              ? 'Your payment has been successfully verified.'
-              : verificationStatus === 'waiting_webhook'
-              ? 'Payment verified. Activating your membership...'
-              : 'Your payment has been received.'}
+                ? 'Your payment has been successfully verified.'
+                : verificationStatus === 'waiting_webhook'
+                  ? 'Payment verified. Activating your membership...'
+                  : 'Your payment has been received.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center space-y-4">
@@ -488,8 +496,8 @@ export default function PaymentSuccessPage() {
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground text-center">
                 {verificationMessage || (
-                  verificationStatus === 'waiting_webhook' 
-                    ? WEBHOOK_WAIT_MESSAGE 
+                  verificationStatus === 'waiting_webhook'
+                    ? WEBHOOK_WAIT_MESSAGE
                     : DEFAULT_VERIFYING_MESSAGE
                 )}
               </p>
@@ -511,7 +519,7 @@ export default function PaymentSuccessPage() {
           {verificationStatus === 'verified' && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground text-center">
-                {memberPosition 
+                {memberPosition
                   ? `Your transaction has been verified and you have been added to the group at position ${memberPosition}.`
                   : verificationMessage || 'Your transaction has been verified and processed successfully.'}
               </p>
