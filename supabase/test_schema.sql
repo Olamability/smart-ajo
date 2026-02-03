@@ -9,6 +9,9 @@
 -- ============================================================================
 
 -- Start transaction for testing (will rollback at end)
+-- NOTE: This transaction only wraps the TEST queries below, not the schema deployment.
+-- The schema should already be deployed before running these tests.
+-- This ROLLBACK only discards the test queries, not your actual schema!
 BEGIN;
 
 -- ============================================================================
@@ -384,4 +387,7 @@ BEGIN
 END $$;
 
 -- Rollback transaction (this was just a test)
+-- NOTE: This ROLLBACK only affects the test transaction above.
+-- Your schema deployment (from schema.sql) is NOT affected by this rollback.
+-- This just cleans up any test data that might have been created during validation.
 ROLLBACK;

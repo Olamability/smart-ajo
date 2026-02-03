@@ -170,11 +170,11 @@ export default function SystemAdminDashboard() {
 
       if (error) throw error;
 
-      if (data && data.length > 0 && data[0].success) {
-        toast.success(data[0].message);
+      if (data && data.success) {
+        toast.success(data.message);
         loadUsers();
       } else {
-        toast.error(data?.[0]?.message || 'Action failed');
+        toast.error(data?.message || 'Action failed');
       }
     } catch (error: unknown) {
       console.error('Error suspending user:', error);
@@ -196,11 +196,11 @@ export default function SystemAdminDashboard() {
 
       if (error) throw error;
 
-      if (data && data.length > 0 && data[0].success) {
-        toast.success(data[0].message);
+      if (data && data.success) {
+        toast.success(data.message);
         loadGroups();
       } else {
-        toast.error(data?.[0]?.message || 'Action failed');
+        toast.error(data?.message || 'Action failed');
       }
     } catch (error: unknown) {
       console.error('Error changing group status:', error);

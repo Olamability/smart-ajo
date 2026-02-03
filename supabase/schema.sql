@@ -1177,7 +1177,7 @@ BEGIN
   SELECT email INTO v_user_email FROM users WHERE id = p_user_id;
   
   IF NOT FOUND THEN
-    RETURN json_build_array(json_build_object('success', false, 'message', 'User not found'));
+    RETURN json_build_object('success', false, 'message', 'User not found');
   END IF;
   
   -- Update user status
@@ -1197,13 +1197,13 @@ BEGIN
     json_build_object('reason', p_reason, 'target_user_email', v_user_email)
   );
   
-  RETURN json_build_array(json_build_object(
+  RETURN json_build_object(
     'success', true, 
     'message', CASE WHEN p_is_active THEN 'User activated successfully' ELSE 'User suspended successfully' END
-  ));
+  );
 EXCEPTION
   WHEN OTHERS THEN
-    RETURN json_build_array(json_build_object('success', false, 'message', SQLERRM));
+    RETURN json_build_object('success', false, 'message', SQLERRM);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -1227,7 +1227,7 @@ BEGIN
   SELECT name INTO v_group_name FROM groups WHERE id = p_group_id;
   
   IF NOT FOUND THEN
-    RETURN json_build_array(json_build_object('success', false, 'message', 'Group not found'));
+    RETURN json_build_object('success', false, 'message', 'Group not found');
   END IF;
   
   -- Update group status
@@ -1247,10 +1247,10 @@ BEGIN
     json_build_object('reason', p_reason, 'new_status', p_new_status, 'group_name', v_group_name)
   );
   
-  RETURN json_build_array(json_build_object('success', true, 'message', 'Group status updated successfully'));
+  RETURN json_build_object('success', true, 'message', 'Group status updated successfully');
 EXCEPTION
   WHEN OTHERS THEN
-    RETURN json_build_array(json_build_object('success', false, 'message', SQLERRM));
+    RETURN json_build_object('success', false, 'message', SQLERRM);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
