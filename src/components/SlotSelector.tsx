@@ -156,7 +156,7 @@ export default function SlotSelector({
               You selected Position #{selectedSlot}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              You will receive your payout in cycle {selectedSlot} (position {selectedSlot} of {totalSlotsCount})
+              You will receive your payout at position {selectedSlot} of {totalSlotsCount}
             </p>
           </div>
         )}

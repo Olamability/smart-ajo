@@ -238,12 +238,20 @@ export const initiatePaystackPayment = async (params: {
   onCancel?: () => void;
   onClose?: () => void;
 }): Promise<PaystackResponse> => {
+  // Ensure metadata has required fields
+  const defaultMetadata: PaymentMetadata = {
+    userId: '',
+    groupId: '',
+    paymentType: 'contribution',
+    ...params.metadata,
+  };
+  
   return paystackService.initializePayment({
     key: paystackService['publicKey'], // Access private field for consistency
     email: params.email,
     amount: paystackService.toKobo(params.amount),
     ref: params.reference,
-    metadata: params.metadata || {} as PaymentMetadata,
+    metadata: defaultMetadata,
     onSuccess: params.onSuccess,
     onCancel: params.onCancel,
     onClose: params.onClose,

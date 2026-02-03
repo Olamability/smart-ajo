@@ -181,39 +181,36 @@ serve(async (req) => {
         }
       }
 
-      // Update group current_members count
-      const { data: groupData, error: groupFetchError } = await supabase
-        .from('groups')
-        .select('total_members, current_members')
-        .eq('id', groupId)
-        .single();
+      // Update group current_members count atomically to avoid race conditions
+      // Try to use database function first for atomic increment
+      const { data: updatedGroup, error: rpcError } = await supabase
+        .rpc('increment_group_members', { group_id_param: groupId });
 
-      if (groupFetchError) {
-        console.error('Error fetching group:', groupFetchError);
-      } else {
-        const newMemberCount = (groupData.current_members || 0) + 1;
-
-        // Update group member count and status
-        const groupUpdate: any = {
-          current_members: newMemberCount,
-        };
-
-        // If group is now full, activate it
-        if (newMemberCount >= groupData.total_members) {
-          groupUpdate.status = 'active';
-          
-          // Initialize contribution cycles for the group
-          // This would ideally be a database function or separate edge function
-          // For now, we'll let the application handle cycle creation
-        }
-
-        const { error: groupUpdateError } = await supabase
+      if (rpcError) {
+        // Fallback: If RPC function doesn't exist, use manual update
+        console.warn('RPC function not available, using fallback update:', rpcError);
+        
+        const { data: groupData, error: groupFetchError } = await supabase
           .from('groups')
-          .update(groupUpdate)
-          .eq('id', groupId);
+          .select('total_members, current_members')
+          .eq('id', groupId)
+          .single();
 
-        if (groupUpdateError) {
-          console.error('Error updating group:', groupUpdateError);
+        if (!groupFetchError && groupData) {
+          const newMemberCount = (groupData.current_members || 0) + 1;
+          const newStatus = newMemberCount >= groupData.total_members ? 'active' : 'forming';
+
+          const { error: groupUpdateError } = await supabase
+            .from('groups')
+            .update({
+              current_members: newMemberCount,
+              status: newStatus,
+            })
+            .eq('id', groupId);
+
+          if (groupUpdateError) {
+            console.error('Error updating group:', groupUpdateError);
+          }
         }
       }
 
