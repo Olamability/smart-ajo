@@ -15,17 +15,19 @@ import { cn } from '@/lib/utils';
 
 interface PaymentBreakdownProps {
   contributionAmount: number;
-  serviceFeePercentage: number;
+  serviceFeePercentage?: number;
   securityDepositAmount: number;
   showSecurityDeposit?: boolean;
+  formatCurrency?: (amount: number) => string; // Optional custom formatter
   className?: string;
 }
 
 export default function PaymentBreakdown({
   contributionAmount,
-  serviceFeePercentage,
+  serviceFeePercentage = 10,
   securityDepositAmount,
   showSecurityDeposit = true,
+  formatCurrency: customFormatCurrency,
   className,
 }: PaymentBreakdownProps) {
   // Calculate amounts
@@ -34,15 +36,15 @@ export default function PaymentBreakdown({
     ? contributionAmount + serviceFee + securityDepositAmount
     : contributionAmount + serviceFee;
 
-  // Format currency
-  const formatCurrency = (amount: number) => {
+  // Format currency - use custom formatter if provided
+  const formatCurrency = customFormatCurrency || ((amount: number) => {
     return new Intl.NumberFormat('en-NG', {
       style: 'currency',
       currency: 'NGN',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount);
-  };
+  });
 
   return (
     <Card className={cn('w-full', className)}>

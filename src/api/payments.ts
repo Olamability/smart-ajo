@@ -5,14 +5,13 @@
  * Integrates with Paystack for payment processing and Supabase for verification.
  * 
  * Payment Flow:
- * 1. Initialize payment (frontend)
- * 2. User completes payment with Paystack
+ * 1. Initialize payment record (creates pending payment in DB)
+ * 2. Caller handles Paystack payment popup
  * 3. Verify payment via Supabase Edge Function (backend)
  * 4. Activate membership/update records
  */
 
 import { createClient } from '@/lib/client/supabase';
-import { paystackService, PaystackResponse, PaymentMetadata } from '@/lib/paystack';
 import { getErrorMessage } from '@/lib/utils';
 
 export interface PaymentInitializationResult {
@@ -24,21 +23,27 @@ export interface PaymentInitializationResult {
 export interface PaymentVerificationResult {
   success: boolean;
   verified?: boolean;
-  data?: any;
+  data?: Record<string, unknown>;
   error?: string;
 }
 
 /**
- * Initialize payment for group creation (creator's initial payment)
- * Creator must pay contribution + service fee + security deposit
+ * Generate a unique payment reference
  */
-export const initializeGroupCreationPayment = async (params: {
-  groupId: string;
-  slotNumber: number;
-  contributionAmount: number;
-  serviceFeePercentage: number;
-  securityDepositAmount: number;
-}): Promise<PaymentInitializationResult> => {
+function generateReference(): string {
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 1000000);
+  return `AJO-${timestamp}-${random}`;
+}
+
+/**
+ * Initialize payment for group creation (creator's initial payment)
+ */
+export const initializeGroupCreationPayment = async (
+  groupId: string,
+  amount: number,
+  slotNumber: number
+): Promise<PaymentInitializationResult> => {
   try {
     const supabase = createClient();
 
@@ -48,54 +53,25 @@ export const initializeGroupCreationPayment = async (params: {
       return { success: false, error: 'Not authenticated' };
     }
 
-    // Calculate total amount
-    const serviceFee = (params.contributionAmount * params.serviceFeePercentage) / 100;
-    const totalAmount = params.contributionAmount + serviceFee + params.securityDepositAmount;
-
     // Generate payment reference
-    const reference = paystackService.generateReference();
-
-    // Create payment metadata
-    const metadata: PaymentMetadata = {
-      userId: user.id,
-      groupId: params.groupId,
-      paymentType: 'group_creation',
-      slotNumber: params.slotNumber,
-      customFields: [
-        {
-          display_name: 'Contribution Amount',
-          variable_name: 'contribution_amount',
-          value: params.contributionAmount,
-        },
-        {
-          display_name: 'Service Fee',
-          variable_name: 'service_fee',
-          value: serviceFee,
-        },
-        {
-          display_name: 'Security Deposit',
-          variable_name: 'security_deposit',
-          value: params.securityDepositAmount,
-        },
-        {
-          display_name: 'Slot Number',
-          variable_name: 'slot_number',
-          value: params.slotNumber,
-        },
-      ],
-    };
+    const reference = generateReference();
 
     // Record payment intent in database
     const { error: recordError } = await supabase
       .from('payments')
       .insert({
         user_id: user.id,
-        group_id: params.groupId,
-        amount: totalAmount,
+        group_id: groupId,
+        amount: amount,
         payment_type: 'group_creation',
         status: 'pending',
         reference: reference,
-        metadata: metadata,
+        metadata: {
+          userId: user.id,
+          groupId: groupId,
+          paymentType: 'group_creation',
+          slotNumber: slotNumber,
+        },
       });
 
     if (recordError) {
@@ -103,45 +79,21 @@ export const initializeGroupCreationPayment = async (params: {
       return { success: false, error: 'Failed to initialize payment' };
     }
 
-    // Initialize Paystack payment
-    await paystackService.initializePayment({
-      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-      email: user.email!,
-      amount: paystackService.toKobo(totalAmount),
-      ref: reference,
-      metadata: metadata,
-      onSuccess: async (response: PaystackResponse) => {
-        // Payment successful - verify on backend
-        await verifyPaymentAndActivateMembership(response.reference);
-      },
-      onCancel: async () => {
-        // Update payment status to cancelled
-        await supabase
-          .from('payments')
-          .update({ status: 'cancelled' })
-          .eq('reference', reference);
-      },
-    });
-
     return { success: true, reference };
   } catch (error) {
     console.error('Error initializing group creation payment:', error);
-    return { success: false, error: getErrorMessage(error) };
+    return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
   }
 };
 
 /**
  * Initialize payment for joining a group (after approval)
- * Member must pay contribution + service fee + security deposit
  */
-export const initializeGroupJoinPayment = async (params: {
-  groupId: string;
-  joinRequestId: string;
-  slotNumber: number;
-  contributionAmount: number;
-  serviceFeePercentage: number;
-  securityDepositAmount: number;
-}): Promise<PaymentInitializationResult> => {
+export const initializeGroupJoinPayment = async (
+  groupId: string,
+  amount: number,
+  slotNumber: number
+): Promise<PaymentInitializationResult> => {
   try {
     const supabase = createClient();
 
@@ -151,59 +103,25 @@ export const initializeGroupJoinPayment = async (params: {
       return { success: false, error: 'Not authenticated' };
     }
 
-    // Calculate total amount
-    const serviceFee = (params.contributionAmount * params.serviceFeePercentage) / 100;
-    const totalAmount = params.contributionAmount + serviceFee + params.securityDepositAmount;
-
     // Generate payment reference
-    const reference = paystackService.generateReference();
-
-    // Create payment metadata
-    const metadata: PaymentMetadata = {
-      userId: user.id,
-      groupId: params.groupId,
-      paymentType: 'group_join',
-      slotNumber: params.slotNumber,
-      customFields: [
-        {
-          display_name: 'Join Request ID',
-          variable_name: 'join_request_id',
-          value: params.joinRequestId,
-        },
-        {
-          display_name: 'Contribution Amount',
-          variable_name: 'contribution_amount',
-          value: params.contributionAmount,
-        },
-        {
-          display_name: 'Service Fee',
-          variable_name: 'service_fee',
-          value: serviceFee,
-        },
-        {
-          display_name: 'Security Deposit',
-          variable_name: 'security_deposit',
-          value: params.securityDepositAmount,
-        },
-        {
-          display_name: 'Slot Number',
-          variable_name: 'slot_number',
-          value: params.slotNumber,
-        },
-      ],
-    };
+    const reference = generateReference();
 
     // Record payment intent in database
     const { error: recordError } = await supabase
       .from('payments')
       .insert({
         user_id: user.id,
-        group_id: params.groupId,
-        amount: totalAmount,
+        group_id: groupId,
+        amount: amount,
         payment_type: 'group_join',
         status: 'pending',
         reference: reference,
-        metadata: metadata,
+        metadata: {
+          userId: user.id,
+          groupId: groupId,
+          paymentType: 'group_join',
+          slotNumber: slotNumber,
+        },
       });
 
     if (recordError) {
@@ -211,42 +129,21 @@ export const initializeGroupJoinPayment = async (params: {
       return { success: false, error: 'Failed to initialize payment' };
     }
 
-    // Initialize Paystack payment
-    await paystackService.initializePayment({
-      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-      email: user.email!,
-      amount: paystackService.toKobo(totalAmount),
-      ref: reference,
-      metadata: metadata,
-      onSuccess: async (response: PaystackResponse) => {
-        // Payment successful - verify on backend
-        await verifyPaymentAndActivateMembership(response.reference);
-      },
-      onCancel: async () => {
-        // Update payment status to cancelled
-        await supabase
-          .from('payments')
-          .update({ status: 'cancelled' })
-          .eq('reference', reference);
-      },
-    });
-
     return { success: true, reference };
   } catch (error) {
     console.error('Error initializing group join payment:', error);
-    return { success: false, error: getErrorMessage(error) };
+    return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
   }
 };
 
 /**
  * Initialize payment for contribution cycle
- * Member pays their contribution for the current cycle
  */
-export const initializeContributionPayment = async (params: {
-  groupId: string;
-  cycleId: string;
-  contributionAmount: number;
-}): Promise<PaymentInitializationResult> => {
+export const initializeContributionPayment = async (
+  groupId: string,
+  cycleId: string,
+  amount: number
+): Promise<PaymentInitializationResult> => {
   try {
     const supabase = createClient();
 
@@ -257,40 +154,25 @@ export const initializeContributionPayment = async (params: {
     }
 
     // Generate payment reference
-    const reference = paystackService.generateReference();
-
-    // Create payment metadata
-    const metadata: PaymentMetadata = {
-      userId: user.id,
-      groupId: params.groupId,
-      paymentType: 'contribution',
-      cycleId: params.cycleId,
-      customFields: [
-        {
-          display_name: 'Contribution Amount',
-          variable_name: 'contribution_amount',
-          value: params.contributionAmount,
-        },
-        {
-          display_name: 'Cycle ID',
-          variable_name: 'cycle_id',
-          value: params.cycleId,
-        },
-      ],
-    };
+    const reference = generateReference();
 
     // Record payment intent in database
     const { error: recordError } = await supabase
       .from('payments')
       .insert({
         user_id: user.id,
-        group_id: params.groupId,
-        cycle_id: params.cycleId,
-        amount: params.contributionAmount,
+        group_id: groupId,
+        cycle_id: cycleId,
+        amount: amount,
         payment_type: 'contribution',
         status: 'pending',
         reference: reference,
-        metadata: metadata,
+        metadata: {
+          userId: user.id,
+          groupId: groupId,
+          paymentType: 'contribution',
+          cycleId: cycleId,
+        },
       });
 
     if (recordError) {
@@ -298,30 +180,10 @@ export const initializeContributionPayment = async (params: {
       return { success: false, error: 'Failed to initialize payment' };
     }
 
-    // Initialize Paystack payment
-    await paystackService.initializePayment({
-      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-      email: user.email!,
-      amount: paystackService.toKobo(params.contributionAmount),
-      ref: reference,
-      metadata: metadata,
-      onSuccess: async (response: PaystackResponse) => {
-        // Payment successful - verify on backend
-        await verifyPaymentAndRecordContribution(response.reference);
-      },
-      onCancel: async () => {
-        // Update payment status to cancelled
-        await supabase
-          .from('payments')
-          .update({ status: 'cancelled' })
-          .eq('reference', reference);
-      },
-    });
-
     return { success: true, reference };
   } catch (error) {
     console.error('Error initializing contribution payment:', error);
-    return { success: false, error: getErrorMessage(error) };
+    return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
   }
 };
 
@@ -358,7 +220,7 @@ export const verifyPaymentAndActivateMembership = async (
     return { success: true, verified: true, data: data.data };
   } catch (error) {
     console.error('Error in payment verification:', error);
-    return { success: false, error: getErrorMessage(error) };
+    return { success: false, error: getErrorMessage(error, 'Payment verification failed') };
   }
 };
 
@@ -395,14 +257,14 @@ export const verifyPaymentAndRecordContribution = async (
     return { success: true, verified: true, data: data.data };
   } catch (error) {
     console.error('Error in payment verification:', error);
-    return { success: false, error: getErrorMessage(error) };
+    return { success: false, error: getErrorMessage(error, 'Payment verification failed') };
   }
 };
 
 /**
  * Get payment history for a user
  */
-export const getUserPayments = async (): Promise<any[]> => {
+export const getUserPayments = async (): Promise<Record<string, unknown>[]> => {
   try {
     const supabase = createClient();
 
@@ -431,7 +293,7 @@ export const getUserPayments = async (): Promise<any[]> => {
 /**
  * Get payment by reference
  */
-export const getPaymentByReference = async (reference: string): Promise<any | null> => {
+export const getPaymentByReference = async (reference: string): Promise<Record<string, unknown> | null> => {
   try {
     const supabase = createClient();
 

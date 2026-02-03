@@ -6,7 +6,6 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Check, X, Calendar, User } from 'lucide-react';
@@ -20,28 +19,37 @@ export interface Slot {
 }
 
 interface SlotSelectorProps {
-  totalSlots: number;
-  availableSlots: Slot[];
+  groupId: string;
+  totalMembers?: number; // Renamed from totalSlots for consistency
+  totalSlots?: number; // Keep for backwards compatibility
+  availableSlots?: Slot[];
   selectedSlot: number | null;
   onSlotSelect: (slotNumber: number) => void;
   disabled?: boolean;
+  isCreator?: boolean; // Added for compatibility
   className?: string;
 }
 
 export default function SlotSelector({
+  groupId,
   totalSlots,
-  availableSlots,
+  totalMembers,
+  availableSlots = [],
   selectedSlot,
   onSlotSelect,
   disabled = false,
+  isCreator,
   className,
 }: SlotSelectorProps) {
   const [slots, setSlots] = useState<Slot[]>([]);
 
+  // Use totalMembers if provided, otherwise fall back to totalSlots
+  const totalSlotsCount = totalMembers || totalSlots || availableSlots.length;
+
   useEffect(() => {
     // Initialize slots array
     const slotsArray: Slot[] = [];
-    for (let i = 1; i <= totalSlots; i++) {
+    for (let i = 1; i <= totalSlotsCount; i++) {
       const existingSlot = availableSlots.find((s) => s.position === i);
       if (existingSlot) {
         slotsArray.push(existingSlot);
@@ -53,7 +61,7 @@ export default function SlotSelector({
       }
     }
     setSlots(slotsArray);
-  }, [totalSlots, availableSlots]);
+  }, [totalSlotsCount, availableSlots]);
 
   const handleSlotClick = (slot: Slot) => {
     if (!disabled && slot.isAvailable) {
@@ -148,7 +156,7 @@ export default function SlotSelector({
               You selected Position #{selectedSlot}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              You will receive your payout in cycle {selectedSlot} (position {selectedSlot} of {totalSlots})
+              You will receive your payout in cycle {selectedSlot} (position {selectedSlot} of {totalSlotsCount})
             </p>
           </div>
         )}
@@ -159,7 +167,7 @@ export default function SlotSelector({
             <span className="font-medium text-foreground">
               {slots.filter((s) => s.isAvailable).length}
             </span>{' '}
-            of {totalSlots} positions available
+            of {totalSlotsCount} positions available
           </p>
         </div>
       </CardContent>

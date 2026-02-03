@@ -22,12 +22,14 @@ declare global {
 }
 
 export interface PaystackConfig {
-  key: string;
+  key?: string;
   email: string;
   amount: number; // Amount in kobo (smallest currency unit)
   ref?: string; // Unique transaction reference
+  reference?: string; // Alternative to ref
   currency?: string;
   metadata?: Record<string, any>;
+  callback_url?: string; // Callback URL (note: doesn't work with popup mode)
   onSuccess?: (response: PaystackResponse) => void;
   onCancel?: () => void;
   onClose?: () => void;
@@ -134,7 +136,9 @@ class PaystackService {
   public async initializePayment(
     config: PaystackConfig
   ): Promise<PaystackResponse> {
-    if (!this.publicKey) {
+    const publicKey = config.key || this.publicKey;
+    
+    if (!publicKey) {
       throw new Error('Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your environment variables.');
     }
 
@@ -149,12 +153,13 @@ class PaystackService {
     return new Promise((resolve, reject) => {
       try {
         const handler = window.PaystackPop.setup({
-          key: this.publicKey,
+          key: publicKey,
           email: config.email,
           amount: config.amount,
-          ref: config.ref || this.generateReference(),
+          ref: config.ref || config.reference || this.generateReference(),
           currency: config.currency || 'NGN',
           metadata: config.metadata || {},
+          callback_url: config.callback_url,
           onSuccess: (response: PaystackResponse) => {
             if (config.onSuccess) {
               config.onSuccess(response);
@@ -189,16 +194,20 @@ class PaystackService {
     email: string;
     amount: number; // In Naira
     metadata: PaymentMetadata;
+    reference?: string;
     onSuccess: (response: PaystackResponse) => void;
     onCancel?: () => void;
+    onClose?: () => void;
   }): Promise<PaystackResponse> {
     return this.initializePayment({
       key: this.publicKey,
       email: params.email,
       amount: this.toKobo(params.amount),
+      ref: params.reference,
       metadata: params.metadata,
       onSuccess: params.onSuccess,
       onCancel: params.onCancel,
+      onClose: params.onClose,
     });
   }
 
@@ -206,7 +215,7 @@ class PaystackService {
    * Verify payment (should be done on backend for security)
    * This is a placeholder - actual verification happens via Supabase Edge Function
    */
-  public async verifyPayment(reference: string): Promise<any> {
+  public async verifyPayment(reference: string): Promise<Record<string, unknown>> {
     // This will be handled by Supabase Edge Function
     // Frontend should call the edge function endpoint
     console.warn('Payment verification should be done on backend via Edge Function');
@@ -219,16 +228,26 @@ export const paystackService = new PaystackService();
 
 /**
  * Quick helper function for initiating Paystack payments
- * @deprecated Use paystackService.initiatePayment instead
  */
 export const initiatePaystackPayment = async (params: {
   email: string;
   amount: number;
-  metadata: PaymentMetadata;
-  onSuccess: (response: PaystackResponse) => void;
+  metadata?: PaymentMetadata;
+  reference?: string;
+  onSuccess: (response?: PaystackResponse) => void;
   onCancel?: () => void;
+  onClose?: () => void;
 }): Promise<PaystackResponse> => {
-  return paystackService.initiatePayment(params);
+  return paystackService.initializePayment({
+    key: paystackService['publicKey'], // Access private field for consistency
+    email: params.email,
+    amount: paystackService.toKobo(params.amount),
+    ref: params.reference,
+    metadata: params.metadata || {} as PaymentMetadata,
+    onSuccess: params.onSuccess,
+    onCancel: params.onCancel,
+    onClose: params.onClose,
+  });
 };
 
 export default paystackService;

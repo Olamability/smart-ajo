@@ -21,34 +21,48 @@ export interface PayoutSlot {
 }
 
 interface PayoutScheduleProps {
-  frequency: 'weekly' | 'monthly' | 'yearly';
-  startDate: Date;
-  totalSlots: number;
+  groupId: string;
+  currentCycle?: number;
+  totalCycles?: number;
+  netPayoutAmount?: number;
+  // Legacy props for backwards compatibility
+  frequency?: 'weekly' | 'monthly' | 'yearly';
+  startDate?: Date;
+  totalSlots?: number;
   occupiedSlots?: PayoutSlot[];
-  contributionAmount: number;
-  serviceFeePercentage: number;
+  contributionAmount?: number;
+  serviceFeePercentage?: number;
   currentUserId?: string;
   className?: string;
 }
 
 export default function PayoutSchedule({
-  frequency,
+  groupId,
+  currentCycle,
+  totalCycles,
+  netPayoutAmount,
+  frequency = 'monthly',
   startDate,
   totalSlots,
   occupiedSlots = [],
   contributionAmount,
-  serviceFeePercentage,
+  serviceFeePercentage = 10,
   currentUserId,
   className,
 }: PayoutScheduleProps) {
-  // Calculate payout amount (total contributions minus service fee)
-  const totalContributions = contributionAmount * totalSlots;
+  // Determine which props to use (new or legacy)
+  const effectiveTotalSlots = totalCycles || totalSlots || 1;
+  const effectiveStartDate = startDate || new Date();
+  
+  // Calculate payout amount
+  const effectiveContributionAmount = contributionAmount || 0;
+  const totalContributions = effectiveContributionAmount * effectiveTotalSlots;
   const serviceFee = (totalContributions * serviceFeePercentage) / 100;
-  const payoutAmount = totalContributions - serviceFee;
+  const payoutAmount = netPayoutAmount || (totalContributions - serviceFee);
 
   // Generate payout dates for all slots
   const generatePayoutDate = (position: number): Date => {
-    const start = new Date(startDate);
+    const start = new Date(effectiveStartDate);
     const periodsToAdd = position - 1;
 
     switch (frequency) {
@@ -65,7 +79,7 @@ export default function PayoutSchedule({
 
   // Build complete schedule
   const schedule: PayoutSlot[] = [];
-  for (let i = 1; i <= totalSlots; i++) {
+  for (let i = 1; i <= effectiveTotalSlots; i++) {
     const existingSlot = occupiedSlots.find((s) => s.position === i);
     const payoutDate = generatePayoutDate(i);
     
@@ -210,7 +224,7 @@ export default function PayoutSchedule({
         <div className="mt-6 pt-4 border-t space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Total Positions:</span>
-            <span className="font-medium">{totalSlots}</span>
+            <span className="font-medium">{effectiveTotalSlots}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Occupied Positions:</span>
@@ -218,6 +232,12 @@ export default function PayoutSchedule({
               {occupiedSlots.filter((s) => s.userName).length}
             </span>
           </div>
+          {currentCycle && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Current Cycle:</span>
+              <span className="font-medium">{currentCycle}</span>
+            </div>
+          )}
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Payout Frequency:</span>
             <span className="font-medium capitalize">
