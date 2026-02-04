@@ -36,6 +36,7 @@ type SignUpForm = z.infer<typeof signUpSchema>;
 
 export default function SignUpPage() {
   const [isLoading, setIsLoading] = useState(false);
+  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
   const navigate = useNavigate();
   const isMountedRef = useRef(true);
   const { signUp } = useAuth();
@@ -57,12 +58,12 @@ export default function SignUpPage() {
 
   const onSubmit = async (data: SignUpForm) => {
     if (!isMountedRef.current) return;
-    
+
     setIsLoading(true);
-    console.log('SignupPage: Starting signup process for', data.email);
-    
+    setEmailConfirmationRequired(false);
+
     try {
-      console.log('SignupPage: Calling signUp function...');
+      console.log('SignupPage: Calling signUp function for', data.email);
       await signUp({
         email: data.email,
         password: data.password,
@@ -70,55 +71,27 @@ export default function SignUpPage() {
         phone: data.phone,
       });
 
-      if (!isMountedRef.current) {
-        console.log('SignupPage: Component unmounted, aborting');
-        return;
-      }
+      if (!isMountedRef.current) return;
 
-      // If we get here, signup was successful and user is authenticated
-      console.log('SignupPage: Signup successful, navigating to dashboard');
-      toast.success('Account created successfully! Redirecting to dashboard...');
-      navigate('/dashboard');
+      // If signUp returned without error but user is not logged in, email confirmation is required
+      setEmailConfirmationRequired(true);
+      toast.success(
+        'Account created! Please check your email to confirm before logging in.',
+        { duration: 6000 }
+      );
+
+      setTimeout(() => {
+        if (isMountedRef.current) navigate('/login');
+      }, 3000);
     } catch (error) {
       console.error('SignupPage: Signup error caught:', error);
-      
-      if (!isMountedRef.current) {
-        console.log('SignupPage: Component unmounted after error, skipping UI updates');
-        return;
-      }
 
-      // Check if this is an email confirmation required error
+      if (!isMountedRef.current) return;
+
       const errorMessage = getErrorMessage(error, 'Failed to create account');
-      console.error('SignupPage: Error message:', errorMessage);
-      
-      if (errorMessage.includes('CONFIRMATION_REQUIRED:')) {
-        // Extract the actual message after the prefix
-        const actualMessage = errorMessage.replace('CONFIRMATION_REQUIRED:', '');
-        console.log('SignupPage: Email confirmation required, showing success message');
-        toast.success('Account created! ' + actualMessage, {
-          duration: 6000,
-        });
-        // Redirect to login page after showing message
-        setTimeout(() => {
-          if (isMountedRef.current) {
-            console.log('SignupPage: Redirecting to login page');
-            navigate('/login');
-          }
-        }, 2000);
-      } else {
-        // Show error for actual failures
-        console.error('SignupPage: Signup failed with error:', errorMessage);
-        toast.error(errorMessage);
-      }
+      toast.error(errorMessage);
     } finally {
-      // Always reset the loading state
-      console.log('SignupPage: Resetting loading state in finally block');
-      if (isMountedRef.current) {
-        setIsLoading(false);
-        console.log('SignupPage: Loading state set to false');
-      } else {
-        console.log('SignupPage: Component unmounted, skipping loading state reset');
-      }
+      if (isMountedRef.current) setIsLoading(false);
     }
   };
 
@@ -139,6 +112,7 @@ export default function SignUpPage() {
 
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {/* Full Name */}
             <div className="space-y-2">
               <Label htmlFor="fullName">Full Name</Label>
               <Input
@@ -148,12 +122,11 @@ export default function SignUpPage() {
                 disabled={isLoading}
               />
               {errors.fullName && (
-                <p className="text-sm text-destructive">
-                  {errors.fullName.message}
-                </p>
+                <p className="text-sm text-destructive">{errors.fullName.message}</p>
               )}
             </div>
 
+            {/* Email */}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -164,12 +137,11 @@ export default function SignUpPage() {
                 disabled={isLoading}
               />
               {errors.email && (
-                <p className="text-sm text-destructive">
-                  {errors.email.message}
-                </p>
+                <p className="text-sm text-destructive">{errors.email.message}</p>
               )}
             </div>
 
+            {/* Phone */}
             <div className="space-y-2">
               <Label htmlFor="phone">Phone Number</Label>
               <Input
@@ -180,12 +152,11 @@ export default function SignUpPage() {
                 disabled={isLoading}
               />
               {errors.phone && (
-                <p className="text-sm text-destructive">
-                  {errors.phone.message}
-                </p>
+                <p className="text-sm text-destructive">{errors.phone.message}</p>
               )}
             </div>
 
+            {/* Password */}
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -196,12 +167,11 @@ export default function SignUpPage() {
                 disabled={isLoading}
               />
               {errors.password && (
-                <p className="text-sm text-destructive">
-                  {errors.password.message}
-                </p>
+                <p className="text-sm text-destructive">{errors.password.message}</p>
               )}
             </div>
 
+            {/* Confirm Password */}
             <div className="space-y-2">
               <Label htmlFor="confirmPassword">Confirm Password</Label>
               <Input
@@ -212,9 +182,7 @@ export default function SignUpPage() {
                 disabled={isLoading}
               />
               {errors.confirmPassword && (
-                <p className="text-sm text-destructive">
-                  {errors.confirmPassword.message}
-                </p>
+                <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
               )}
             </div>
 
@@ -224,6 +192,8 @@ export default function SignUpPage() {
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Creating account...
                 </>
+              ) : emailConfirmationRequired ? (
+                'Check your email'
               ) : (
                 'Create account'
               )}
