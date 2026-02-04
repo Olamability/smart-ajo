@@ -13,6 +13,9 @@ import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
 import { parseAtomicRPCResponse, isTransientError } from '@/lib/utils/auth';
 
+// Delay to allow database triggers and RLS policies to propagate after profile creation
+const PROFILE_CREATION_DELAY_MS = 500;
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -236,7 +239,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
           console.log('refreshUser: Attempting to create missing profile');
           await createUserProfileViaRPC(session.user);
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
           await loadUserProfile(session.user.id, true);
           console.log('refreshUser: Profile created and loaded successfully');
           return true;
@@ -279,14 +282,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // If profile doesn't exist, try to create it
         try {
           await createUserProfileViaRPC(data.user);
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
           await loadUserProfile(data.user.id, true);
           console.log('login: Profile created and loaded successfully');
         } catch (createError) {
           console.error('login: Failed to create/load profile:', createError);
           // Clean up by signing out if we can't load/create profile
           await supabase.auth.signOut();
-          throw new Error('Failed to load user profile. Please try again or contact support if the issue persists.');
+          const errorMsg = createError instanceof Error ? createError.message : 'Unknown error';
+          throw new Error(`Failed to load user profile: ${errorMsg}. Please try again or contact support if the issue persists.`);
         }
       }
     } catch (error) {
@@ -408,7 +412,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           } catch (_error) {
             try {
               await createUserProfileViaRPC(session.user);
-              await new Promise(resolve => setTimeout(resolve, 500));
+              await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
               await loadUserProfile(session.user.id, true);
             } catch (createError) {
               console.error('Failed to create profile during init:', createError);
@@ -419,9 +423,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch (error) {
         console.error('Error during auth initialization:', error);
       } finally {
+        // ✅ FIX: Mark initialization as complete before checking mounted state
+        // This prevents race conditions where component unmounts during initialization
+        initCompleted = true;
         if (mounted) {
           setLoading(false);
-          initCompleted = true; // ✅ FIX: Mark initialization as complete
         }
       }
     };
@@ -443,7 +449,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } catch (_error) {
           try {
             await createUserProfileViaRPC(session.user);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
             await loadUserProfile(session.user.id, true);
           } catch (createError) {
             console.error('Failed to create profile on auth state change:', createError);
