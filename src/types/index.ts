@@ -131,7 +131,7 @@ export interface Transaction {
   id: string;
   userId: string;
   groupId: string;
-  type: 'contribution' | 'payout' | 'security_deposit' | 'penalty' | 'refund';
+  type: 'contribution' | 'payout' | 'security_deposit' | 'penalty' | 'refund' | 'deposit' | 'withdrawal' | 'fee';
   amount: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled'; // Match database schema
   date: string;

@@ -24,7 +24,7 @@ interface PaymentBreakdownProps {
 
 export default function PaymentBreakdown({
   contributionAmount,
-  serviceFeePercentage = 10,
+  serviceFeePercentage = 2,
   securityDepositAmount,
   showSecurityDeposit = true,
   formatCurrency: customFormatCurrency,
