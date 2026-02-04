@@ -46,7 +46,7 @@ export default function PayoutSchedule({
   totalSlots,
   occupiedSlots = [],
   contributionAmount,
-  serviceFeePercentage = 10,
+  serviceFeePercentage = 2,
   currentUserId,
   className,
 }: PayoutScheduleProps) {

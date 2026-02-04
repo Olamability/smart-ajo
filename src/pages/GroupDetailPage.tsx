@@ -363,7 +363,7 @@ export default function GroupDetailPage() {
     if (!group) return 0;
     const totalPool = calculateTotalPool();
     // Use the service fee percentage from the group
-    const feePercentage = group.serviceFeePercentage || 10;
+    const feePercentage = group.serviceFeePercentage || 2;
     return totalPool * (feePercentage / 100);
   };
 
@@ -821,7 +821,7 @@ export default function GroupDetailPage() {
                 </div>
                 <div className="flex justify-between items-center py-3 border-b">
                   <span className="text-muted-foreground">
-                    Service Fee ({group.serviceFeePercentage || 10}%)
+                    Service Fee ({group.serviceFeePercentage || 2}%)
                   </span>
                   <span className="text-xl font-semibold text-orange-600">
                     -{formatCurrency(calculateServiceFee())}
@@ -837,7 +837,7 @@ export default function GroupDetailPage() {
                 <Alert className="mt-4">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="text-xs">
-                    <strong>Service Fee Model:</strong> The platform fee of {group.serviceFeePercentage || 10}% is
+                    <strong>Service Fee Model:</strong> The platform fee of {group.serviceFeePercentage || 2}% is
                     calculated as a percentage of the total pool and is deducted once per cycle
                     when the payout is disbursed. This ensures fair scaling regardless of group size.
                   </AlertDescription>
