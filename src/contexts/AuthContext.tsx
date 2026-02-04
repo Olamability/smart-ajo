@@ -13,6 +13,9 @@ import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
 import { parseAtomicRPCResponse, isTransientError } from '@/lib/utils/auth';
 
+// Delay to allow database triggers and RLS policies to propagate after profile creation
+const PROFILE_CREATION_DELAY_MS = 500;
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
@@ -236,7 +239,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
           console.log('refreshUser: Attempting to create missing profile');
           await createUserProfileViaRPC(session.user);
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
           await loadUserProfile(session.user.id, true);
           console.log('refreshUser: Profile created and loaded successfully');
           return true;
@@ -257,29 +260,39 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       console.log('login: Starting login for:', email);
 
-      const profileLoadedPromise = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Profile loading timed out after 10 seconds'));
-        }, 10000);
-        const checkInterval = setInterval(() => {
-          if (userRef.current !== null) {
-            clearTimeout(timeout);
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 100);
-      });
-
       const { error, data } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error('login: Auth error:', error.message);
         throw error;
       }
 
-      if (!data?.user || !data.session) throw new Error('Login failed: No user data returned');
-      console.log('login: Auth successful, waiting for profile to load via auth state change...');
-      await profileLoadedPromise;
-      console.log('login: Profile loaded, login complete');
+      if (!data?.user || !data.session) {
+        throw new Error('Login failed: No user data returned');
+      }
+
+      console.log('login: Auth successful, loading user profile...');
+      
+      // ✅ FIX: Directly load profile with retry logic instead of polling
+      try {
+        await loadUserProfile(data.user.id, true);
+        console.log('login: Profile loaded successfully, login complete');
+      } catch (profileError) {
+        console.error('login: Failed to load profile, attempting to create:', profileError);
+        
+        // If profile doesn't exist, try to create it
+        try {
+          await createUserProfileViaRPC(data.user);
+          await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
+          await loadUserProfile(data.user.id, true);
+          console.log('login: Profile created and loaded successfully');
+        } catch (createError) {
+          console.error('login: Failed to create/load profile:', createError);
+          // Clean up by signing out if we can't load/create profile
+          await supabase.auth.signOut();
+          const errorMsg = createError instanceof Error ? createError.message : 'Unknown error';
+          throw new Error(`Failed to load user profile: ${errorMsg}. Please try again or contact support if the issue persists.`);
+        }
+      }
     } catch (error) {
       console.error('login: Login failed:', error);
       reportError(error, { operation: 'login', email: email });
@@ -344,7 +357,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log('signUp: User profile created successfully');
       } catch (profileCreationError) {
         console.error('signUp: Failed to create user profile:', profileCreationError);
-        try { await supabase.auth.signOut(); } catch { }
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutError) {
+          console.error('Failed to sign out after profile creation error:', signOutError);
+        }
         setUser(null);
         isLoadingProfileRef.current = false;
         throw profileCreationError;
@@ -392,10 +409,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.log('Found existing session, loading user profile...');
           try {
             await loadUserProfile(session.user.id);
-          } catch (error) {
+          } catch (_error) {
             try {
               await createUserProfileViaRPC(session.user);
-              await new Promise(resolve => setTimeout(resolve, 500));
+              await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
               await loadUserProfile(session.user.id, true);
             } catch (createError) {
               console.error('Failed to create profile during init:', createError);
@@ -406,7 +423,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch (error) {
         console.error('Error during auth initialization:', error);
       } finally {
-        if (mounted) setLoading(false);
+        // ✅ FIX: Mark initialization as complete before checking mounted state
+        // This prevents race conditions where component unmounts during initialization
+        initCompleted = true;
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -424,10 +446,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (event === 'SIGNED_IN' && session?.user) {
         try {
           await loadUserProfile(session.user.id);
-        } catch (error) {
+        } catch (_error) {
           try {
             await createUserProfileViaRPC(session.user);
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
             await loadUserProfile(session.user.id, true);
           } catch (createError) {
             console.error('Failed to create profile on auth state change:', createError);
