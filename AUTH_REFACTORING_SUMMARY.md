@@ -187,7 +187,7 @@ Profile loads reliably
 
 ### Build Status
 ✅ **TypeScript compilation:** PASSED
-✅ **Vite build:** PASSED (8.49s)
+✅ **Vite build:** PASSED (~8 seconds)
 ✅ **No new linting errors**
 
 ### Test Scenarios Covered

@@ -111,16 +111,21 @@ export function mapAuthErrorToMessage(error: unknown): string {
     return 'Invalid session. Please log in again.';
   }
 
-  // Weak password
+  // Weak password - Supabase default minimum is 6 characters
+  // Note: This matches Supabase's default password policy
   if (
     message.includes('password') &&
-    (message.includes('weak') || message.includes('too short') || message.includes('length'))
+    (message.includes('weak') || message.includes('too short') || message.includes('length') || message.includes('at least'))
   ) {
     return 'Password must be at least 6 characters long.';
   }
 
-  // Email validation
-  if (message.includes('invalid email') || (message.includes('email') && message.includes('format'))) {
+  // Email validation - be specific to avoid false positives
+  if (
+    message.includes('invalid email') ||
+    message.includes('email format') ||
+    (message.includes('email') && message.includes('valid'))
+  ) {
     return 'Please enter a valid email address.';
   }
 
