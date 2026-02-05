@@ -11,10 +11,11 @@ import { User } from '@/types';
 import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
-import { parseAtomicRPCResponse, isTransientError } from '@/lib/utils/auth';
+import { parseAtomicRPCResponse, isTransientError, calculateBackoffDelay } from '@/lib/utils/auth';
 
 // Delay to allow database triggers and RLS policies to propagate after profile creation
-const PROFILE_CREATION_DELAY_MS = 500;
+// Increased from 500ms to 1000ms to ensure better RLS policy propagation
+const PROFILE_CREATION_DELAY_MS = 1000;
 
 interface AuthContextType {
   user: User | null;
@@ -35,6 +36,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /**
  * Helper function to create user profile via atomic RPC function
+ * Includes retry logic to handle transient network errors
  */
 async function createUserProfileViaRPC(
   authUser: { id: string; email?: string; user_metadata?: Record<string, unknown> }
@@ -77,12 +79,33 @@ async function createUserProfileViaRPC(
     fullName: fullName
   });
 
-  const rpcResponse = await supabase.rpc('create_user_profile_atomic', {
-    p_user_id: authUser.id,
-    p_email: userEmail,
-    p_phone: phone,
-    p_full_name: fullName,
-  });
+  // Retry RPC call with exponential backoff to handle transient network errors
+  const rpcResponse = await retryWithBackoff(
+    async () => {
+      const response = await supabase.rpc('create_user_profile_atomic', {
+        p_user_id: authUser.id,
+        p_email: userEmail,
+        p_phone: phone,
+        p_full_name: fullName,
+      });
+      
+      // Check for transient errors that should be retried
+      if (response.error) {
+        if (isTransientError(response.error)) {
+          throw response.error;
+        }
+        // Non-transient errors should fail immediately
+        const error: Error & { stopRetry?: boolean } = new Error(response.error.message);
+        error.stopRetry = true;
+        throw error;
+      }
+      
+      return response;
+    },
+    3,  // Max 3 attempts
+    100,  // 100ms base delay
+    (retryCount) => console.log(`createUserProfileViaRPC: Retry attempt ${retryCount} for user ${authUser.id}`)
+  );
 
   console.log('createUserProfileViaRPC: RPC response:', rpcResponse);
   parseAtomicRPCResponse(rpcResponse, 'User profile creation');
@@ -109,6 +132,8 @@ async function checkUserExists(email: string, phone: string): Promise<{
     console.error('checkUserExists: Error checking user existence:', error);
     const errorCode = (error as { code?: string }).code || '';
     const errorMessage = error.message || '';
+    
+    // Check for critical network/connection errors that should fail signup
     const isCriticalError =
       errorCode === 'PGRST301' ||
       errorCode === '08000' ||
@@ -118,11 +143,13 @@ async function checkUserExists(email: string, phone: string): Promise<{
       errorMessage.includes('fetch');
 
     if (isCriticalError) {
-      console.error('checkUserExists: Critical error detected, rethrowing');
-      throw new Error('Network error. Please check your connection and try again.');
+      console.error('checkUserExists: Critical error detected, failing signup');
+      throw new Error('Unable to verify account availability. Please check your connection and try again.');
     }
 
-    console.log('checkUserExists: Non-critical error, allowing signup to proceed');
+    // For non-critical errors (e.g., function not found), log and allow signup
+    // This prevents blocking signups due to database configuration issues
+    console.warn('checkUserExists: Non-critical error, allowing signup to proceed (database may handle duplicates)');
     return { emailExists: false, phoneExists: false, userId: null };
   }
 
@@ -155,9 +182,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       isLoadingProfileRef.current = true;
       console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}`);
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) throw new Error('No active session. Please try logging in again.');
-      if (sessionData.session.user.id !== userId) throw new Error('Session user mismatch');
+      
+      // Retry session check with backoff - session might be restoring after redirect
+      let session = null;
+      
+      for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('loadUserProfile: Session error:', sessionError);
+          // If there's a session error, wait and retry
+          if (sessionAttempts < 4) {
+            const delay = calculateBackoffDelay(sessionAttempts);
+            console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new Error('Unable to verify session. Please try logging in again.');
+        }
+        
+        if (sessionData.session) {
+          session = sessionData.session;
+          break;
+        }
+        
+        // No session yet, wait and retry
+        if (sessionAttempts < 4) {
+          const delay = calculateBackoffDelay(sessionAttempts);
+          console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          throw new Error('Session expired or not found. Please log in again.');
+        }
+      }
+      
+      if (!session) {
+        throw new Error('Session expired or not found. Please log in again.');
+      }
+      
+      if (session.user.id !== userId) {
+        throw new Error('Session user mismatch');
+      }
 
       const result = await retryWithBackoff(
         async () => {
@@ -216,13 +281,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUser = async (): Promise<boolean> => {
     try {
       console.log('refreshUser: Starting user refresh');
-      const { data, error } = await supabase.auth.getSession();
-      if (error) {
-        console.error('refreshUser: Session error:', error);
-        setUser(null);
-        return false;
+      
+      // Retry session check with backoff to handle post-redirect session restoration
+      let session = null;
+      
+      for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('refreshUser: Session error:', error);
+          if (sessionAttempts < 4) {
+            const delay = calculateBackoffDelay(sessionAttempts);
+            console.log(`refreshUser: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          setUser(null);
+          return false;
+        }
+        
+        if (data.session) {
+          session = data.session;
+          break;
+        }
+        
+        // No session yet, wait and retry
+        if (sessionAttempts < 4) {
+          const delay = calculateBackoffDelay(sessionAttempts);
+          console.log(`refreshUser: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          console.log('refreshUser: No active session found after retries');
+          setUser(null);
+          return false;
+        }
       }
-      const session = data.session;
+      
       if (!session?.user) {
         console.log('refreshUser: No active session found');
         setUser(null);
