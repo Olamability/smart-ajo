@@ -1352,15 +1352,11 @@ CREATE POLICY "Admins can update any group"
 -- ----------------------------------------------------------------------------
 
 -- Users can view members of groups they belong to
+-- Note: Recursive self-reference removed to prevent infinite recursion
 CREATE POLICY "Users can view group members"
   ON group_members FOR SELECT
   USING (
     auth.uid() = user_id OR
-    EXISTS (
-      SELECT 1 FROM group_members gm
-      WHERE gm.group_id = group_members.group_id 
-        AND gm.user_id = auth.uid()
-    ) OR
     EXISTS (
       SELECT 1 FROM groups g
       WHERE g.id = group_members.group_id 
