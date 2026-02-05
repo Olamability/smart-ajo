@@ -10,8 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Shield, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { getErrorMessage } from '@/lib/utils';
-import { getErrorType } from '@/lib/utils/errorHandling';
+import { mapAuthErrorToMessage, isEmailConfirmationRequired } from '@/lib/utils/authErrors';
 import { reportError } from '@/lib/utils/errorTracking';
 
 const loginSchema = z.object({
@@ -66,12 +65,18 @@ export default function LoginPage() {
       reportError(error, {
         operation: 'login',
         email: data.email,
-        errorType: getErrorType(error),
       });
       
-      const errorMessage = getErrorMessage(error, 'Invalid email or password');
+      // Use the new auth error mapping utility for user-friendly messages
+      const errorMessage = mapAuthErrorToMessage(error);
       console.error('LoginPage: Showing error to user:', errorMessage);
-      toast.error(errorMessage);
+      
+      // Show different toast styles for email confirmation vs other errors
+      if (isEmailConfirmationRequired(error)) {
+        toast.warning(errorMessage, { duration: 6000 });
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       // ALWAYS reset loading state, whether success or failure
       if (isMountedRef.current) {
