@@ -299,15 +299,15 @@ export default function GroupDetailPage() {
           // Payment successful! Redirect to verification page
           // The PaymentSuccessPage will handle verification with proper session management
           console.log('Payment successful, reference:', response.reference);
-          setIsProcessingPayment(false);
           
-          toast.info('Payment received! Redirecting to verification...', {
-            duration: 3000,
+          toast.success('Payment completed! Verifying...', {
+            duration: 2000,
           });
           
-          // Navigate to payment success page for verification
-          // Note: callback_url doesn't work with Paystack popup, must navigate manually
-          navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
+          // Use window.location.href for full page reload to ensure proper session restoration
+          // This is more reliable than navigate() after payment redirect
+          // Keep isProcessingPayment true until we navigate away
+          window.location.href = `/payment/success?reference=${initResult.reference}&group=${id}`;
         },
         onClose: () => {
           // User closed payment modal without completing payment
