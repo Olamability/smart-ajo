@@ -71,7 +71,7 @@ export default function PaymentSuccessPage() {
 
   const handleContinue = () => {
     if (groupId) {
-      navigate(`/groups/${groupId}`);
+      navigate(`/groups/${groupId}?reload=true`);
     } else {
       navigate('/dashboard');
     }

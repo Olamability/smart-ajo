@@ -561,7 +561,8 @@ export const getPendingJoinRequests = async (
  * Approve a join request (for group creator/admin)
  */
 export const approveJoinRequest = async (
-  requestId: string
+  requestId: string,
+  assignedPosition: number
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     const supabase = createClient();
@@ -577,6 +578,7 @@ export const approveJoinRequest = async (
     const { data, error } = await supabase.rpc('approve_join_request', {
       p_request_id: requestId,
       p_reviewer_id: user.id,
+      p_assigned_position: assignedPosition,
     });
 
     if (error) {

@@ -66,6 +66,9 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
+// Constants
+const DEFAULT_SLOT_POSITION = 1;
+
 interface JoinRequest {
   id: string;
   user_id: string;
@@ -117,6 +120,9 @@ export default function GroupDetailPage() {
       if (import.meta.env.DEV) {
         console.log('Reloading data after payment verification...');
       }
+      
+      // Reset payment processing state
+      setIsProcessingPayment(false);
       
       // Reload all data to reflect updated membership status
       loadGroupDetails();
@@ -198,10 +204,10 @@ export default function GroupDetailPage() {
     }
   };
 
-  const handleApproveRequest = async (requestId: string) => {
+  const handleApproveRequest = async (requestId: string, preferredSlot: number) => {
     setProcessingRequestId(requestId);
     try {
-      const result = await approveJoinRequest(requestId);
+      const result = await approveJoinRequest(requestId, preferredSlot);
       if (result.success) {
         toast.success('Join request approved! User can now pay security deposit.');
         // Reload join requests and members
@@ -1069,7 +1075,7 @@ export default function GroupDetailPage() {
                           <Button
                             size="sm"
                             variant="default"
-                            onClick={() => handleApproveRequest(request.id)}
+                            onClick={() => handleApproveRequest(request.id, request.preferred_slot || DEFAULT_SLOT_POSITION)}
                             disabled={processingRequestId === request.id}
                             className="whitespace-nowrap"
                           >
