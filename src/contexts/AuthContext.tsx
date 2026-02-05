@@ -473,9 +473,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (needsEmailConfirmation) {
         console.log('signUp: Email confirmation required - profile will be created after user confirms and logs in');
         // Throw a special marker error that the UI can catch
-        const confirmationError: Error & { requiresConfirmation?: boolean } = new Error('CONFIRMATION_REQUIRED');
-        confirmationError.requiresConfirmation = true;
-        throw confirmationError;
+        throw new Error('CONFIRMATION_REQUIRED');
       }
 
       // If no email confirmation required (instant login), create profile and load it
