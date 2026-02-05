@@ -207,3 +207,11 @@ WHERE email = 'admin@example.com';
 ```
 
 Admin must log out and back in for JWT to refresh.
+
+## Deployment
+
+To apply this fix, use the migration file:
+
+1. **Quick Start**: See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for step-by-step instructions
+2. **Complete Guide**: See [supabase/migrations/README.md](supabase/migrations/README.md) for all deployment options
+3. **Migration File**: `supabase/migrations/20260205020229_fix_rls_infinite_recursion.sql`
