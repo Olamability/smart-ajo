@@ -1287,24 +1287,25 @@ CREATE POLICY "Users can update own profile"
   ON users FOR UPDATE
   USING (auth.uid() = id);
 
--- Admins can view all users
+-- Admins can view all users (using raw user metadata to avoid infinite recursion)
+-- Note: This checks auth.jwt() which contains user claims without querying users table
 CREATE POLICY "Admins can view all users"
   ON users FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
+    OR 
+    -- Fallback: allow if directly querying own record and it has is_admin = true
+    (auth.uid() = id AND is_admin = true)
   );
 
--- Admins can update any user
+-- Admins can update any user (using raw user metadata to avoid infinite recursion)
 CREATE POLICY "Admins can update any user"
   ON users FOR UPDATE
   USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
+    OR
+    -- Fallback: allow if directly updating own record and it has is_admin = true
+    (auth.uid() = id AND is_admin = true)
   );
 
 -- ----------------------------------------------------------------------------

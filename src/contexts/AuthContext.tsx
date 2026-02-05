@@ -374,6 +374,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const { error, data } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         console.error('login: Auth error:', error.message);
+        // Re-throw auth errors with full context for UI error mapping
         throw error;
       }
 
@@ -383,7 +384,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       console.log('login: Auth successful, loading user profile...');
       
-      // ✅ FIX: Pass the session from signInWithPassword directly to avoid race condition
+      // ✅ Pass the session from signInWithPassword directly to avoid race condition
       // This prevents loadUserProfile from calling getSession() which may not be ready yet
       try {
         await loadUserProfile(data.user.id, true, data.session);
@@ -392,6 +393,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.error('login: Failed to load profile, attempting to create:', profileError);
         
         // If profile doesn't exist, try to create it
+        // This handles users who signed up but didn't complete email confirmation
         try {
           await createUserProfileViaRPC(data.user);
           await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
@@ -464,10 +466,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         needsEmailConfirmation,
       });
 
+      // ✅ NEW APPROACH: Don't create profile during signup
+      // Profile creation will happen during first login after email confirmation
+      // This prevents issues with unconfirmed accounts and simplifies the flow
+      
+      if (needsEmailConfirmation) {
+        console.log('signUp: Email confirmation required - profile will be created after user confirms and logs in');
+        // Throw a special marker error that the UI can catch
+        const confirmationError: Error & { requiresConfirmation?: boolean } = new Error('CONFIRMATION_REQUIRED');
+        confirmationError.requiresConfirmation = true;
+        throw confirmationError;
+      }
+
+      // If no email confirmation required (instant login), create profile and load it
+      console.log('signUp: No email confirmation required, creating profile...');
       try {
-        console.log('signUp: Creating user profile in database');
         await createUserProfileViaRPC(data.user);
         console.log('signUp: User profile created successfully');
+        await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
+        
+        // Load profile with the session from signup
+        if (data.session) {
+          await loadUserProfile(data.user.id, true, data.session);
+          console.log('signUp: Profile loaded, signup complete');
+        }
       } catch (profileCreationError) {
         console.error('signUp: Failed to create user profile:', profileCreationError);
         try {
@@ -479,20 +501,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoadingProfileRef.current = false;
         throw profileCreationError;
       }
-
-      // ✅ FIX: Handle confirmation without throwing
-      if (needsEmailConfirmation) {
-        console.log('Email confirmation required - profile will be loaded after confirmation');
-        return; // exit early, no error thrown
-      }
-
-      console.log('signUp: Signup complete. Session established, profile loading will be handled by auth state change event.');
     } catch (error) {
-      // Only throw unexpected errors
-      if (!(error instanceof Error) || !error.message.includes('CONFIRMATION_REQUIRED')) {
-        console.error('Signup error:', error);
-        throw error;
-      }
+      console.error('Signup error:', error);
+      throw error;
     }
   };
 

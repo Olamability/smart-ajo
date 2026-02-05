@@ -73,20 +73,28 @@ export default function SignUpPage() {
 
       if (!isMountedRef.current) return;
 
-      // If signUp returned without error but user is not logged in, email confirmation is required
-      setEmailConfirmationRequired(true);
-      toast.success(
-        'Account created! Please check your email to confirm before logging in.',
-        { duration: 6000 }
-      );
-
-      setTimeout(() => {
-        if (isMountedRef.current) navigate('/login');
-      }, 3000);
+      // If we reach here without error and without being logged in, it means instant login happened
+      // The user will be redirected by the auth state change in AuthContext
+      toast.success('Account created successfully! Redirecting to dashboard...', { duration: 3000 });
     } catch (error) {
       console.error('SignupPage: Signup error caught:', error);
 
       if (!isMountedRef.current) return;
+
+      // Check if this is the email confirmation required marker
+      if (error instanceof Error && error.message === 'CONFIRMATION_REQUIRED') {
+        setEmailConfirmationRequired(true);
+        toast.success(
+          'Account created! Please check your email to confirm your account before logging in.',
+          { duration: 8000 }
+        );
+
+        // Redirect to login page after a delay
+        setTimeout(() => {
+          if (isMountedRef.current) navigate('/login');
+        }, 3000);
+        return;
+      }
 
       const errorMessage = getErrorMessage(error, 'Failed to create account');
       toast.error(errorMessage);
