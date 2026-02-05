@@ -86,6 +86,12 @@ export default function ContributionsList({
         email: user.email || '',
         amount: contribution.amount,
         reference: result.reference,
+        metadata: {
+          userId: user.id,
+          groupId: groupId,
+          paymentType: 'contribution',
+          cycleId: contribution.id, // Using contribution ID as cycleId for now
+        },
         onSuccess: () => {
           // Redirect to payment success page for verification
           // Include group ID so user can navigate back to group after verification
