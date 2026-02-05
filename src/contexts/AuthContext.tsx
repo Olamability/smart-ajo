@@ -472,7 +472,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // This prevents issues with unconfirmed accounts and simplifies the flow
       
       if (needsEmailConfirmation) {
-        console.log('signUp: Email confirmation required - profile will be created after user confirms and logs in');
+        console.log('signUp: Email confirmation required, deferring profile creation');
         // Throw a custom error class for type-safe error handling
         throw new EmailConfirmationRequiredError();
       }
