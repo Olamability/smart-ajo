@@ -146,7 +146,10 @@ serve(async (req) => {
         completed_at: new Date().toISOString(),
         metadata: {
           ...metadata,
-          paystack_response: paymentData,
+          verification: {
+            paystack_response: paymentData,
+            verified_at: new Date().toISOString(),
+          },
         },
       })
       .eq('reference', reference);
