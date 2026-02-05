@@ -176,7 +176,8 @@ class PaystackService {
             if (config.onClose) {
               config.onClose();
             }
-            // Note: onClose is called after both success and cancel
+            // NOTE: onClose is called only when user closes popup without completing payment
+            // It is NOT called after successful payment (onSuccess is called instead)
           },
         });
 
