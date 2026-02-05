@@ -11,7 +11,7 @@ import { User } from '@/types';
 import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
-import { parseAtomicRPCResponse, isTransientError } from '@/lib/utils/auth';
+import { parseAtomicRPCResponse, isTransientError, calculateBackoffDelay } from '@/lib/utils/auth';
 
 // Delay to allow database triggers and RLS policies to propagate after profile creation
 const PROFILE_CREATION_DELAY_MS = 500;
@@ -168,7 +168,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.error('loadUserProfile: Session error:', sessionError);
           // If there's a session error, wait and retry
           if (sessionAttempts < maxSessionAttempts - 1) {
-            const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+            const delay = calculateBackoffDelay(sessionAttempts);
             console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
             await new Promise(resolve => setTimeout(resolve, delay));
             sessionAttempts++;
@@ -184,7 +184,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         
         // No session yet, wait and retry
         if (sessionAttempts < maxSessionAttempts - 1) {
-          const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+          const delay = calculateBackoffDelay(sessionAttempts);
           console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           sessionAttempts++;
@@ -270,7 +270,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (error) {
           console.error('refreshUser: Session error:', error);
           if (sessionAttempts < maxSessionAttempts - 1) {
-            const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+            const delay = calculateBackoffDelay(sessionAttempts);
             console.log(`refreshUser: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
             await new Promise(resolve => setTimeout(resolve, delay));
             sessionAttempts++;
@@ -287,7 +287,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         
         // No session yet, wait and retry
         if (sessionAttempts < maxSessionAttempts - 1) {
-          const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+          const delay = calculateBackoffDelay(sessionAttempts);
           console.log(`refreshUser: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           sessionAttempts++;

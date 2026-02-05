@@ -13,6 +13,7 @@
 
 import { createClient } from '@/lib/client/supabase';
 import { getErrorMessage } from '@/lib/utils';
+import { calculateBackoffDelay } from '@/lib/utils/auth';
 
 export interface PaymentInitializationResult {
   success: boolean;
@@ -33,18 +34,16 @@ export interface PaymentVerificationResult {
  */
 async function ensureSessionAvailable(maxAttempts = 5): Promise<boolean> {
   const supabase = createClient();
-  let attempts = 0;
   
-  while (attempts < maxAttempts) {
+  for (let attempts = 0; attempts < maxAttempts; attempts++) {
     const { data: { session }, error } = await supabase.auth.getSession();
     
     if (error) {
       console.error('ensureSessionAvailable: Session error:', error);
       if (attempts < maxAttempts - 1) {
-        const delay = Math.min(100 * Math.pow(2, attempts), 2000);
+        const delay = calculateBackoffDelay(attempts);
         console.log(`ensureSessionAvailable: Retrying in ${delay}ms (attempt ${attempts + 1}/${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        attempts++;
         continue;
       }
       return false;
@@ -57,16 +56,13 @@ async function ensureSessionAvailable(maxAttempts = 5): Promise<boolean> {
     
     // No session yet, wait and retry
     if (attempts < maxAttempts - 1) {
-      const delay = Math.min(100 * Math.pow(2, attempts), 2000);
+      const delay = calculateBackoffDelay(attempts);
       console.log(`ensureSessionAvailable: Session not ready, retrying in ${delay}ms (attempt ${attempts + 1}/${maxAttempts})`);
       await new Promise(resolve => setTimeout(resolve, delay));
-      attempts++;
-    } else {
-      console.log('ensureSessionAvailable: Session not available after retries');
-      return false;
     }
   }
   
+  console.log('ensureSessionAvailable: Session not available after retries');
   return false;
 }
 

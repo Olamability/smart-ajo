@@ -96,3 +96,15 @@ export function isTransientError(error: string | Error | ErrorWithCode): boolean
   
   return false;
 }
+
+/**
+ * Calculate exponential backoff delay in milliseconds
+ * 
+ * @param attempt - The current attempt number (0-indexed)
+ * @param baseDelay - Base delay in milliseconds (default: 100)
+ * @param maxDelay - Maximum delay in milliseconds (default: 2000)
+ * @returns Delay in milliseconds capped at maxDelay
+ */
+export function calculateBackoffDelay(attempt: number, baseDelay: number = 100, maxDelay: number = 2000): number {
+  return Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+}
