@@ -76,28 +76,43 @@ CREATE POLICY "Admins can view all users"
 ## Deployment Instructions
 
 ### Prerequisites
-- Supabase CLI installed (`npm install -g supabase`)
-- Access to Supabase project
-- Database connection credentials
+- Access to Supabase project dashboard
+- Database connection credentials (for CLI methods)
+- Optional: Supabase CLI installed (`npm install -g supabase`)
 
 ### Step 1: Apply Schema Changes
 
-#### Option A: Via Supabase Dashboard (Recommended)
+#### Option A: Use Migration File (Recommended)
+
+The easiest way to apply this fix is using the dedicated migration file:
+
+1. Go to [Supabase Dashboard](https://app.supabase.com) → Your Project
+2. Navigate to **SQL Editor**
+3. Open and copy the contents of `supabase/migrations/20260205020229_fix_rls_infinite_recursion.sql`
+4. Paste into the SQL Editor
+5. Click **Run** to execute
+
+See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed instructions.
+
+#### Option B: Via Supabase Dashboard (Full Schema)
+
+For new installations:
 1. Log into your Supabase dashboard
 2. Navigate to SQL Editor
 3. Copy the contents of `supabase/schema.sql`
 4. Execute the SQL to recreate all tables and policies
 
-#### Option B: Via Supabase CLI
+#### Option C: Via Supabase CLI
 ```bash
-# Link to your project
-supabase link --project-ref your-project-ref
+# Apply the migration directly
+psql $DATABASE_URL < supabase/migrations/20260205020229_fix_rls_infinite_recursion.sql
 
-# Push database changes
+# Or link and push
+supabase link --project-ref your-project-ref
 supabase db push
 ```
 
-#### Option C: Manual Policy Updates
+#### Option D: Manual Policy Updates
 If you only want to update the policies without recreating tables:
 
 ```sql

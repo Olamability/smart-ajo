@@ -70,13 +70,19 @@ CREATE POLICY "Admins can view all users"
 
 ### Quick Deployment Steps
 
-1. **Apply Schema Changes**
+#### Option 1: Use the Migration File (Recommended)
+
+A dedicated migration file has been created for easy deployment:
+
+1. **Apply the Migration**
    ```bash
    # Via Supabase Dashboard
    # 1. Go to SQL Editor
-   # 2. Copy contents of supabase/schema.sql
+   # 2. Copy contents of supabase/migrations/20260205020229_fix_rls_infinite_recursion.sql
    # 3. Execute the SQL
    ```
+   
+   See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed instructions.
 
 2. **Configure Admin Users** (if you have admins)
    ```sql
@@ -91,6 +97,16 @@ CREATE POLICY "Admins can view all users"
    - Have users log out completely
    - Users log back in
    - Confirm no "infinite recursion" errors
+
+#### Option 2: Full Schema Deployment
+
+For new installations, you can apply the complete schema:
+```bash
+# Via Supabase Dashboard
+# 1. Go to SQL Editor
+# 2. Copy contents of supabase/schema.sql
+# 3. Execute the SQL
+```
 
 See `RLS_INFINITE_RECURSION_FIX.md` for detailed deployment instructions.
 

@@ -87,6 +87,8 @@ See [PAYMENT_INTEGRATION_README.md](./PAYMENT_INTEGRATION_README.md) for complet
 - **[Edge Functions Setup Guide](./EDGE_FUNCTIONS_SETUP.md)** - Complete edge functions deployment guide
 - **[Edge Functions CORS Fix](./EDGE_FUNCTIONS_CORS_FIX.md)** - Fix CORS errors with Edge Functions
 - **[Supabase Setup](./SUPABASE_SETUP.md)** - Database and backend configuration
+- **[Migration Guide](./MIGRATION_GUIDE.md)** - **🔄 Database migration quick start guide**
+- **[Migrations README](./supabase/migrations/README.md)** - Complete guide to database migrations
 
 ## 🛠️ Development
 
