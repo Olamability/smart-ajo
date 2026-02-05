@@ -118,6 +118,9 @@ export default function GroupDetailPage() {
         console.log('Reloading data after payment verification...');
       }
       
+      // Reset payment processing state
+      setIsProcessingPayment(false);
+      
       // Reload all data to reflect updated membership status
       loadGroupDetails();
       loadMembers();
@@ -198,10 +201,10 @@ export default function GroupDetailPage() {
     }
   };
 
-  const handleApproveRequest = async (requestId: string) => {
+  const handleApproveRequest = async (requestId: string, preferredSlot: number) => {
     setProcessingRequestId(requestId);
     try {
-      const result = await approveJoinRequest(requestId);
+      const result = await approveJoinRequest(requestId, preferredSlot);
       if (result.success) {
         toast.success('Join request approved! User can now pay security deposit.');
         // Reload join requests and members
@@ -1069,7 +1072,7 @@ export default function GroupDetailPage() {
                           <Button
                             size="sm"
                             variant="default"
-                            onClick={() => handleApproveRequest(request.id)}
+                            onClick={() => handleApproveRequest(request.id, request.preferred_slot || 1)}
                             disabled={processingRequestId === request.id}
                             className="whitespace-nowrap"
                           >
