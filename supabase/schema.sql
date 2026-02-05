@@ -1293,9 +1293,6 @@ CREATE POLICY "Admins can view all users"
   ON users FOR SELECT
   USING (
     (auth.jwt()->>'is_admin')::boolean = true
-    OR 
-    -- Fallback: allow if directly querying own record and it has is_admin = true
-    (auth.uid() = id AND is_admin = true)
   );
 
 -- Admins can update any user (using raw user metadata to avoid infinite recursion)
@@ -1303,9 +1300,6 @@ CREATE POLICY "Admins can update any user"
   ON users FOR UPDATE
   USING (
     (auth.jwt()->>'is_admin')::boolean = true
-    OR
-    -- Fallback: allow if directly updating own record and it has is_admin = true
-    (auth.uid() = id AND is_admin = true)
   );
 
 -- ----------------------------------------------------------------------------
@@ -1350,10 +1344,7 @@ CREATE POLICY "Creators can update own groups"
 CREATE POLICY "Admins can update any group"
   ON groups FOR UPDATE
   USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- ----------------------------------------------------------------------------
@@ -1391,10 +1382,7 @@ CREATE POLICY "Creators and admins can update members"
       WHERE g.id = group_members.group_id 
         AND g.created_by = auth.uid()
     ) OR
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- ----------------------------------------------------------------------------
@@ -1513,10 +1501,7 @@ CREATE POLICY "System can update transactions"
 CREATE POLICY "Admins can view all transactions"
   ON transactions FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- ----------------------------------------------------------------------------
@@ -1604,10 +1589,7 @@ CREATE POLICY "System can insert notifications"
 CREATE POLICY "Admins can view audit logs"
   ON audit_logs FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM users
-      WHERE id = auth.uid() AND is_admin = true
-    )
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- System can insert audit logs
