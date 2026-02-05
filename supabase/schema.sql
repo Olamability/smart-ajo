@@ -1361,7 +1361,8 @@ CREATE POLICY "Users can view group members"
       SELECT 1 FROM groups g
       WHERE g.id = group_members.group_id 
         AND g.created_by = auth.uid()
-    )
+    ) OR
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- System can insert members (via RPC functions)

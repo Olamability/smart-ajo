@@ -45,6 +45,9 @@ CREATE POLICY "Users can view group members"
       WHERE g.id = group_members.group_id 
         AND g.created_by = auth.uid()
     )
+    OR
+    -- Admins can view all group members
+    (auth.jwt()->>'is_admin')::boolean = true
   );
 
 -- ============================================================================
