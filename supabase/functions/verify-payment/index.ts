@@ -197,25 +197,27 @@ serve(async (req) => {
       // - An existing member's status changes to 'active'
       // This eliminates the need for manual counting and prevents race conditions
 
-      // Check if group should be activated (all slots filled)
-      const { data: groupData, error: groupFetchError } = await supabase
+      // Update group status to 'active' if all members have joined
+      // Using eq filters makes this operation safe from race conditions:
+      // - Only updates if status is still 'forming'
+      // - Even if multiple payments complete simultaneously, all will set status to 'active' (idempotent)
+      // - The trigger ensures current_members is accurately maintained
+      const { data: groupData } = await supabase
         .from('groups')
-        .select('total_members, current_members, status')
+        .select('total_members, current_members')
         .eq('id', groupId)
         .single();
 
-      if (!groupFetchError && groupData) {
-        // If all members have joined and paid, activate the group
-        if (groupData.status === 'forming' && groupData.current_members >= groupData.total_members) {
-          const { error: statusUpdateError } = await supabase
-            .from('groups')
-            .update({ status: 'active' })
-            .eq('id', groupId);
+      if (groupData && groupData.current_members >= groupData.total_members) {
+        const { error: statusUpdateError } = await supabase
+          .from('groups')
+          .update({ status: 'active' })
+          .eq('id', groupId)
+          .eq('status', 'forming'); // Only update if still forming (race-safe)
 
-          if (statusUpdateError) {
-            console.error('Error activating group:', statusUpdateError);
-            // Don't fail the request, just log the error
-          }
+        if (statusUpdateError) {
+          console.error('Error activating group:', statusUpdateError);
+          // Don't fail the request, group status update is non-critical for payment verification
         }
       }
 

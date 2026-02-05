@@ -176,8 +176,9 @@ class PaystackService {
             if (config.onClose) {
               config.onClose();
             }
-            // NOTE: onClose is called only when user closes popup without completing payment
-            // It is NOT called after successful payment (onSuccess is called instead)
+            // NOTE: According to Paystack documentation, onClose is called when user manually closes
+            // the payment modal without completing payment. In most cases, it's mutually exclusive
+            // with onSuccess, but behavior may vary depending on integration type and popup state.
           },
         });
 
