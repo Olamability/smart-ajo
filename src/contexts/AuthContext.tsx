@@ -7,6 +7,7 @@ import {
   ReactNode,
 } from 'react';
 import { createClient } from '@/lib/client/supabase';
+import type { Session } from '@supabase/supabase-js';
 import { User } from '@/types';
 import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
@@ -175,53 +176,69 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     userRef.current = user;
   }, [user]);
 
-  const loadUserProfile = async (userId: string, force: boolean = false): Promise<boolean> => {
+  const loadUserProfile = async (
+    userId: string, 
+    force: boolean = false,
+    existingSession?: Session | null
+  ): Promise<boolean> => {
     if (!force && isLoadingProfileRef.current) return false;
     if (!force && userRef.current?.id === userId) return true;
 
     try {
       isLoadingProfileRef.current = true;
-      console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}`);
+      console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}${existingSession ? ' (using provided session)' : ''}`);
       
-      // Retry session check with backoff - session might be restoring after redirect
-      let session = null;
+      // Validate session (either provided or fetched)
+      let session: Session | null = null;
       
-      for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('loadUserProfile: Session error:', sessionError);
-          // If there's a session error, wait and retry
+      // If we have an existing session passed in, use it directly (e.g., from login)
+      // This avoids race conditions where getSession() might not immediately reflect the new session
+      if (existingSession) {
+        if (existingSession.user.id !== userId) {
+          throw new Error('Session user mismatch');
+        }
+        session = existingSession;
+        console.log('loadUserProfile: Using provided session, skipping session verification');
+      } else {
+        // Only verify session if one wasn't provided
+        // Retry session check with backoff - session might be restoring after redirect
+        for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError) {
+            console.error('loadUserProfile: Session error:', sessionError);
+            // If there's a session error, wait and retry
+            if (sessionAttempts < 4) {
+              const delay = calculateBackoffDelay(sessionAttempts);
+              console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+            throw new Error('Unable to verify session. Please try logging in again.');
+          }
+          
+          if (sessionData.session) {
+            session = sessionData.session;
+            break;
+          }
+          
+          // No session yet, wait and retry
           if (sessionAttempts < 4) {
             const delay = calculateBackoffDelay(sessionAttempts);
-            console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
+            console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
+          } else {
+            throw new Error('Session expired or not found. Please log in again.');
           }
-          throw new Error('Unable to verify session. Please try logging in again.');
         }
         
-        if (sessionData.session) {
-          session = sessionData.session;
-          break;
-        }
-        
-        // No session yet, wait and retry
-        if (sessionAttempts < 4) {
-          const delay = calculateBackoffDelay(sessionAttempts);
-          console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        } else {
+        if (!session) {
           throw new Error('Session expired or not found. Please log in again.');
         }
-      }
-      
-      if (!session) {
-        throw new Error('Session expired or not found. Please log in again.');
-      }
-      
-      if (session.user.id !== userId) {
-        throw new Error('Session user mismatch');
+        
+        if (session.user.id !== userId) {
+          throw new Error('Session user mismatch');
+        }
       }
 
       const result = await retryWithBackoff(
@@ -366,9 +383,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       console.log('login: Auth successful, loading user profile...');
       
-      // ✅ FIX: Directly load profile with retry logic instead of polling
+      // ✅ FIX: Pass the session from signInWithPassword directly to avoid race condition
+      // This prevents loadUserProfile from calling getSession() which may not be ready yet
       try {
-        await loadUserProfile(data.user.id, true);
+        await loadUserProfile(data.user.id, true, data.session);
         console.log('login: Profile loaded successfully, login complete');
       } catch (profileError) {
         console.error('login: Failed to load profile, attempting to create:', profileError);
@@ -377,7 +395,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
           await createUserProfileViaRPC(data.user);
           await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
-          await loadUserProfile(data.user.id, true);
+          // Still pass the session to avoid race condition on retry
+          await loadUserProfile(data.user.id, true, data.session);
           console.log('login: Profile created and loaded successfully');
         } catch (createError) {
           console.error('login: Failed to create/load profile:', createError);
