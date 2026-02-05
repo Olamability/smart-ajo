@@ -111,8 +111,9 @@ export function mapAuthErrorToMessage(error: unknown): string {
     return 'Invalid session. Please log in again.';
   }
 
-  // Weak password - Supabase default minimum is 6 characters
-  // Note: This matches Supabase's default password policy
+  // Weak password - Supabase password policy
+  // Note: As of 2024, Supabase default minimum is 6 characters
+  // This can be configured in Supabase project settings
   if (
     message.includes('password') &&
     (message.includes('weak') || message.includes('too short') || message.includes('length') || message.includes('at least'))

@@ -501,10 +501,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw profileCreationError;
       }
     } catch (error) {
-      // Don't log EmailConfirmationRequiredError as an error - it's an expected flow
+      // EmailConfirmationRequiredError is an expected flow marker, not an actual error
+      // It's intentionally re-thrown for UI handling but not logged as an error
       if (!(error instanceof EmailConfirmationRequiredError)) {
         console.error('Signup error:', error);
       }
+      // Re-throw all errors (including EmailConfirmationRequiredError) for UI handling
       throw error;
     }
   };
