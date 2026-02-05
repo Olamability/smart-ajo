@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { verifyPaymentAndActivateMembership } from '@/api/payments';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,6 @@ import { toast } from 'sonner';
 
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const [verifying, setVerifying] = useState(true);
   const [verified, setVerified] = useState(false);
