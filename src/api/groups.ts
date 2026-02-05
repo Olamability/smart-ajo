@@ -297,6 +297,7 @@ export const getGroupById = async (
 
 /**
  * Get all members of a group
+ * Uses RPC function to bypass RLS recursion issues
  */
 export const getGroupMembers = async (
   groupId: string
@@ -304,18 +305,9 @@ export const getGroupMembers = async (
   try {
     const supabase = createClient();
 
+    // Use RPC function to get group members with proper authorization
     const { data, error } = await supabase
-      .from('group_members')
-      .select(`
-        *,
-        users (
-          full_name,
-          email,
-          phone
-        )
-      `)
-      .eq('group_id', groupId)
-      .order('position', { ascending: true });
+      .rpc('get_group_members_safe', { p_group_id: groupId });
 
     if (error) {
       console.error('Error fetching group members:', error);
@@ -324,7 +316,7 @@ export const getGroupMembers = async (
 
     const members: GroupMember[] = (data || []).map((member: any) => ({
       userId: member.user_id,
-      userName: member.users?.full_name || 'Unknown User',
+      userName: member.full_name || 'Unknown User',
       joinedAt: member.joined_at,
       rotationPosition: member.position,
       securityDepositPaid: member.has_paid_security_deposit,
