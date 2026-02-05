@@ -18,6 +18,7 @@ import { Shield, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { getErrorMessage } from '@/lib/utils';
+import { EmailConfirmationRequiredError } from '@/lib/utils/authErrors';
 
 const signUpSchema = z
   .object({
@@ -81,8 +82,8 @@ export default function SignUpPage() {
 
       if (!isMountedRef.current) return;
 
-      // Check if this is the email confirmation required marker
-      if (error instanceof Error && error.message === 'CONFIRMATION_REQUIRED') {
+      // Check if this is the email confirmation required error (type-safe)
+      if (error instanceof EmailConfirmationRequiredError) {
         setEmailConfirmationRequired(true);
         toast.success(
           'Account created! Please check your email to confirm your account before logging in.',

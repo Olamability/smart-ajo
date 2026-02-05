@@ -3,6 +3,17 @@
  * Maps Supabase auth errors to user-friendly messages
  */
 
+/**
+ * Custom error class for email confirmation required flow
+ * This makes the intent explicit and enables type-safe error handling
+ */
+export class EmailConfirmationRequiredError extends Error {
+  constructor() {
+    super('Email confirmation is required before logging in');
+    this.name = 'EmailConfirmationRequiredError';
+  }
+}
+
 interface AuthError {
   message: string;
   code?: string;
@@ -109,7 +120,7 @@ export function mapAuthErrorToMessage(error: unknown): string {
   }
 
   // Email validation
-  if (message.includes('invalid email') || message.includes('email') && message.includes('format')) {
+  if (message.includes('invalid email') || (message.includes('email') && message.includes('format'))) {
     return 'Please enter a valid email address.';
   }
 

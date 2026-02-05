@@ -13,6 +13,7 @@ import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
 import { parseAtomicRPCResponse, isTransientError, calculateBackoffDelay } from '@/lib/utils/auth';
+import { EmailConfirmationRequiredError } from '@/lib/utils/authErrors';
 
 // Delay to allow database triggers and RLS policies to propagate after profile creation
 // Increased from 500ms to 1000ms to ensure better RLS policy propagation
@@ -472,8 +473,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (needsEmailConfirmation) {
         console.log('signUp: Email confirmation required - profile will be created after user confirms and logs in');
-        // Throw a special marker error that the UI can catch
-        throw new Error('CONFIRMATION_REQUIRED');
+        // Throw a custom error class for type-safe error handling
+        throw new EmailConfirmationRequiredError();
       }
 
       // If no email confirmation required (instant login), create profile and load it
@@ -500,8 +501,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw profileCreationError;
       }
     } catch (error) {
-      // Don't log CONFIRMATION_REQUIRED as an error - it's an expected flow
-      if (!(error instanceof Error && error.message === 'CONFIRMATION_REQUIRED')) {
+      // Don't log EmailConfirmationRequiredError as an error - it's an expected flow
+      if (!(error instanceof EmailConfirmationRequiredError)) {
         console.error('Signup error:', error);
       }
       throw error;
