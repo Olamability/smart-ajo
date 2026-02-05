@@ -4,11 +4,15 @@
  * Handles payment verification after successful Paystack payment.
  * This page is called after payment completion to verify the transaction
  * and activate user's membership in the group.
+ * 
+ * Note: After Paystack redirect, session restoration may take a moment.
+ * We wait for auth context to be ready before attempting verification.
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { verifyPaymentAndActivateMembership } from '@/api/payments';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle, Loader2, XCircle, ArrowRight } from 'lucide-react';
@@ -16,6 +20,7 @@ import { CheckCircle, Loader2, XCircle, ArrowRight } from 'lucide-react';
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [verifying, setVerifying] = useState(true);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +36,21 @@ export default function PaymentSuccessPage() {
         return;
       }
 
+      // Wait for auth context to be ready after redirect
+      // This ensures session is fully restored before attempting verification
+      if (authLoading) {
+        console.log('PaymentSuccessPage: Waiting for auth context to be ready...');
+        return;
+      }
+
+      if (!isAuthenticated) {
+        setError('Please log in to verify your payment');
+        setVerifying(false);
+        return;
+      }
+
       try {
+        console.log('PaymentSuccessPage: Verifying payment with reference:', reference);
         const result = await verifyPaymentAndActivateMembership(reference);
         
         if (result.success && result.verified) {
@@ -40,6 +59,7 @@ export default function PaymentSuccessPage() {
           setError(result.error || 'Payment verification failed');
         }
       } catch (err) {
+        console.error('PaymentSuccessPage: Verification error:', err);
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
         setVerifying(false);
@@ -47,7 +67,7 @@ export default function PaymentSuccessPage() {
     };
 
     verifyPayment();
-  }, [reference]);
+  }, [reference, authLoading, isAuthenticated]);
 
   const handleContinue = () => {
     if (groupId) {

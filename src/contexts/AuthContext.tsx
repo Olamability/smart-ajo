@@ -155,9 +155,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       isLoadingProfileRef.current = true;
       console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}`);
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) throw new Error('No active session. Please try logging in again.');
-      if (sessionData.session.user.id !== userId) throw new Error('Session user mismatch');
+      
+      // Retry session check with backoff - session might be restoring after redirect
+      let session = null;
+      let sessionAttempts = 0;
+      const maxSessionAttempts = 5;
+      
+      while (!session && sessionAttempts < maxSessionAttempts) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('loadUserProfile: Session error:', sessionError);
+          // If there's a session error, wait and retry
+          if (sessionAttempts < maxSessionAttempts - 1) {
+            const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+            console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            sessionAttempts++;
+            continue;
+          }
+          throw new Error('Unable to verify session. Please try logging in again.');
+        }
+        
+        if (sessionData.session) {
+          session = sessionData.session;
+          break;
+        }
+        
+        // No session yet, wait and retry
+        if (sessionAttempts < maxSessionAttempts - 1) {
+          const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+          console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          sessionAttempts++;
+        } else {
+          throw new Error('Session expired or not found. Please log in again.');
+        }
+      }
+      
+      if (!session) {
+        throw new Error('Session expired or not found. Please log in again.');
+      }
+      
+      if (session.user.id !== userId) {
+        throw new Error('Session user mismatch');
+      }
 
       const result = await retryWithBackoff(
         async () => {
@@ -216,13 +258,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUser = async (): Promise<boolean> => {
     try {
       console.log('refreshUser: Starting user refresh');
-      const { data, error } = await supabase.auth.getSession();
-      if (error) {
-        console.error('refreshUser: Session error:', error);
-        setUser(null);
-        return false;
+      
+      // Retry session check with backoff to handle post-redirect session restoration
+      let session = null;
+      let sessionAttempts = 0;
+      const maxSessionAttempts = 5;
+      
+      while (!session && sessionAttempts < maxSessionAttempts) {
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('refreshUser: Session error:', error);
+          if (sessionAttempts < maxSessionAttempts - 1) {
+            const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+            console.log(`refreshUser: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            sessionAttempts++;
+            continue;
+          }
+          setUser(null);
+          return false;
+        }
+        
+        if (data.session) {
+          session = data.session;
+          break;
+        }
+        
+        // No session yet, wait and retry
+        if (sessionAttempts < maxSessionAttempts - 1) {
+          const delay = Math.min(100 * Math.pow(2, sessionAttempts), 2000);
+          console.log(`refreshUser: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          sessionAttempts++;
+        } else {
+          console.log('refreshUser: No active session found after retries');
+          setUser(null);
+          return false;
+        }
       }
-      const session = data.session;
+      
       if (!session?.user) {
         console.log('refreshUser: No active session found');
         setUser(null);
