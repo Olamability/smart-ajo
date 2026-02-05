@@ -500,7 +500,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw profileCreationError;
       }
     } catch (error) {
-      console.error('Signup error:', error);
+      // Don't log CONFIRMATION_REQUIRED as an error - it's an expected flow
+      if (!(error instanceof Error && error.message === 'CONFIRMATION_REQUIRED')) {
+        console.error('Signup error:', error);
+      }
       throw error;
     }
   };
