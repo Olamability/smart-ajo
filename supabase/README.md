@@ -5,6 +5,8 @@ This directory contains the complete database schema and setup instructions for 
 ## 📋 Contents
 
 - `schema.sql` - Complete database schema with tables, RLS policies, functions, and triggers
+- `migrations/` - Database migrations for incremental schema updates (see [migrations/README.md](migrations/README.md))
+- `functions/` - Supabase Edge Functions for serverless backend logic
 
 ## 🚀 Quick Start
 
@@ -69,6 +71,28 @@ After running the schema, verify that everything was created successfully:
 2. Open the application in your browser
 3. Try to sign up for a new account
 4. If successful, your database is properly configured!
+
+## 🔄 Database Migrations
+
+For existing databases or incremental updates, use the migration files in the `migrations/` directory instead of running the full `schema.sql`.
+
+### When to Use Migrations
+
+- **New project**: Use `schema.sql` (Steps 1-5 above)
+- **Existing project**: Use migration files to apply specific updates
+- **Production updates**: Always use migrations to avoid data loss
+
+### Applying Migrations
+
+See the [migrations/README.md](migrations/README.md) for detailed instructions on:
+- How to apply migrations
+- Post-migration steps
+- Rollback procedures
+- Creating new migrations
+
+### Available Migrations
+
+- **20260205020229_fix_rls_infinite_recursion.sql** - Fixes infinite recursion in RLS policies that prevented user login
 
 ## 📊 Database Schema Overview
 
