@@ -185,20 +185,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       // Retry session check with backoff - session might be restoring after redirect
       let session = null;
-      let sessionAttempts = 0;
-      const maxSessionAttempts = 5;
       
-      while (!session && sessionAttempts < maxSessionAttempts) {
+      for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
           console.error('loadUserProfile: Session error:', sessionError);
           // If there's a session error, wait and retry
-          if (sessionAttempts < maxSessionAttempts - 1) {
+          if (sessionAttempts < 4) {
             const delay = calculateBackoffDelay(sessionAttempts);
-            console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+            console.log(`loadUserProfile: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            sessionAttempts++;
             continue;
           }
           throw new Error('Unable to verify session. Please try logging in again.');
@@ -210,11 +207,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         
         // No session yet, wait and retry
-        if (sessionAttempts < maxSessionAttempts - 1) {
+        if (sessionAttempts < 4) {
           const delay = calculateBackoffDelay(sessionAttempts);
-          console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+          console.log(`loadUserProfile: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
           await new Promise(resolve => setTimeout(resolve, delay));
-          sessionAttempts++;
         } else {
           throw new Error('Session expired or not found. Please log in again.');
         }
@@ -288,19 +284,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       // Retry session check with backoff to handle post-redirect session restoration
       let session = null;
-      let sessionAttempts = 0;
-      const maxSessionAttempts = 5;
       
-      while (!session && sessionAttempts < maxSessionAttempts) {
+      for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
         const { data, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error('refreshUser: Session error:', error);
-          if (sessionAttempts < maxSessionAttempts - 1) {
+          if (sessionAttempts < 4) {
             const delay = calculateBackoffDelay(sessionAttempts);
-            console.log(`refreshUser: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+            console.log(`refreshUser: Retrying session check in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            sessionAttempts++;
             continue;
           }
           setUser(null);
@@ -313,11 +306,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         
         // No session yet, wait and retry
-        if (sessionAttempts < maxSessionAttempts - 1) {
+        if (sessionAttempts < 4) {
           const delay = calculateBackoffDelay(sessionAttempts);
-          console.log(`refreshUser: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/${maxSessionAttempts})`);
+          console.log(`refreshUser: Session not ready, retrying in ${delay}ms (attempt ${sessionAttempts + 1}/5)`);
           await new Promise(resolve => setTimeout(resolve, delay));
-          sessionAttempts++;
         } else {
           console.log('refreshUser: No active session found after retries');
           setUser(null);
