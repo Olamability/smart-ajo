@@ -289,10 +289,10 @@ export default function GroupDetailPage() {
         amount: paystackService.toKobo(totalAmount), // Convert to kobo
         reference: initResult.reference,
         metadata: {
-          type: isCreator ? 'group_creation' : 'group_join',
-          group_id: id,
-          user_id: user.id,
-          preferred_slot: preferredSlot,
+          paymentType: isCreator ? 'group_creation' : 'group_join',
+          groupId: id,
+          userId: user.id,
+          slotNumber: preferredSlot,
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
         onSuccess: (response: PaystackResponse) => {

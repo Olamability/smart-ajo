@@ -48,7 +48,9 @@ export interface PaymentMetadata {
   groupId: string;
   paymentType: 'group_creation' | 'group_join' | 'contribution' | 'security_deposit';
   slotNumber?: number;
-  cycleId?: string;
+  cycleId?: string; // Deprecated - use contributionId instead
+  contributionId?: string; // ID of the contribution record to update after payment
+  cycleNumber?: number; // For reference/display purposes
   customFields?: Array<{
     display_name: string;
     variable_name: string;
