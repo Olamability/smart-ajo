@@ -20,7 +20,7 @@ CREATE OR REPLACE FUNCTION get_group_members_safe(p_group_id UUID)
 RETURNS TABLE (
   user_id UUID,
   group_id UUID,
-  position INTEGER,
+  "position" INTEGER,
   status member_status_enum,
   security_deposit_amount DECIMAL(10,2),
   has_paid_security_deposit BOOLEAN,
