@@ -69,9 +69,10 @@ export default function ContributionsList({
     
     try {
       // Initialize payment record in database
+      // Note: contribution.id is the ID of the contribution record we need to update after payment
       const result = await initializeContributionPayment(
-        contribution.id,
         groupId,
+        contribution.id, // This is the contribution ID, which will be used to update the right record
         contribution.amount
       );
       
@@ -90,7 +91,8 @@ export default function ContributionsList({
           userId: user.id,
           groupId: groupId,
           paymentType: 'contribution',
-          cycleId: contribution.id, // Using contribution ID as cycleId for now
+          contributionId: contribution.id, // Store the contribution ID to update after payment
+          cycleNumber: contribution.cycleNumber, // Also store cycle number for reference
         },
         onSuccess: () => {
           // Redirect to payment success page for verification

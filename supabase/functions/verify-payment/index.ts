@@ -237,29 +237,28 @@ serve(async (req) => {
         }
       }
     } else if (paymentType === 'contribution') {
-      // Record contribution payment
-      const cycleId = metadata.cycleId;
+      // Update existing contribution record to mark as paid
+      const contributionId = metadata.contributionId;
       
-      if (!cycleId) {
+      if (!contributionId) {
         return new Response(
-          JSON.stringify({ success: false, error: 'Cycle ID required for contribution payment' }),
+          JSON.stringify({ success: false, error: 'Contribution ID required for contribution payment' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
+      // Update the contribution record to mark it as paid
       const { error: contributionError } = await supabase
         .from('contributions')
-        .insert({
-          group_id: groupId,
-          cycle_id: cycleId,
-          user_id: userId,
-          amount: paymentData.amount / 100, // Convert from kobo to naira
-          payment_reference: reference,
+        .update({
           status: 'paid',
-        });
+          paid_date: new Date().toISOString(),
+          transaction_ref: reference,
+        })
+        .eq('id', contributionId);
 
       if (contributionError) {
-        console.error('Error recording contribution:', contributionError);
+        console.error('Error updating contribution:', contributionError);
         return new Response(
           JSON.stringify({ success: false, error: 'Failed to record contribution' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -267,35 +266,41 @@ serve(async (req) => {
       }
 
       // Check if all members have contributed for this cycle
-      const { data: cycleData } = await supabase
-        .from('contribution_cycles')
-        .select('*, groups!inner(total_members)')
-        .eq('id', cycleId)
+      // First get the contribution to find group and cycle info
+      const { data: contributionData } = await supabase
+        .from('contributions')
+        .select('group_id, cycle_number')
+        .eq('id', contributionId)
         .single();
 
-      if (cycleData) {
+      if (contributionData) {
+        // Count total paid contributions for this cycle
         const { data: contributionsData } = await supabase
           .from('contributions')
           .select('id')
-          .eq('cycle_id', cycleId)
+          .eq('group_id', contributionData.group_id)
+          .eq('cycle_number', contributionData.cycle_number)
           .eq('status', 'paid');
 
+        // Get total members in the group
+        const { data: groupData } = await supabase
+          .from('groups')
+          .select('total_members')
+          .eq('id', contributionData.group_id)
+          .single();
+
         const totalContributions = contributionsData?.length || 0;
-        const requiredContributions = cycleData.groups.total_members;
+        const requiredContributions = groupData?.total_members || 0;
 
-        // If all members have paid, mark cycle as complete and process payout
+        // If all members have paid for this cycle, trigger payout processing
+        // (Future implementation: Create payout record, initiate transfer, etc.)
         if (totalContributions >= requiredContributions) {
-          const { error: cycleUpdateError } = await supabase
-            .from('contribution_cycles')
-            .update({ status: 'completed' })
-            .eq('id', cycleId);
-
-          if (cycleUpdateError) {
-            console.error('Error updating cycle status:', cycleUpdateError);
-          }
-
-          // Trigger payout processing (could be another edge function)
-          // For now, we'll let the application handle payout logic
+          console.log(`Cycle ${contributionData.cycle_number} complete for group ${contributionData.group_id} - ${totalContributions}/${requiredContributions} paid`);
+          // TODO: Implement payout logic here
+          // 1. Calculate payout amount
+          // 2. Identify recipient (based on rotation_position)
+          // 3. Create payout record
+          // 4. Initiate transfer via Paystack Transfer API
         }
       }
     }

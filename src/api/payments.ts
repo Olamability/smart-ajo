@@ -177,10 +177,13 @@ export const initializeGroupJoinPayment = async (
 
 /**
  * Initialize payment for contribution cycle
+ * @param groupId - The group ID
+ * @param contributionId - The contribution record ID to update after payment
+ * @param amount - The contribution amount
  */
 export const initializeContributionPayment = async (
   groupId: string,
-  cycleId: string,
+  contributionId: string,
   amount: number
 ): Promise<PaymentInitializationResult> => {
   try {
@@ -209,7 +212,7 @@ export const initializeContributionPayment = async (
           userId: user.id,
           groupId: groupId,
           paymentType: 'contribution',
-          cycleId: cycleId,
+          contributionId: contributionId,
         },
       });
 
