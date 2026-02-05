@@ -164,59 +164,60 @@ serve(async (req) => {
 
     // Handle different payment types
     if (paymentType === 'group_creation' || paymentType === 'group_join') {
-      // Add user as group member with selected slot
+      // Add or update user as group member with selected slot
+      // Use upsert to handle both new members (group_creation) and existing pending members (group_join)
       const { error: memberError } = await supabase
         .from('group_members')
-        .insert({
-          group_id: groupId,
-          user_id: userId,
-          rotation_position: slotNumber,
-          status: 'active',
-          payment_status: 'paid',
-          has_paid_security_deposit: true,
-        });
+        .upsert(
+          {
+            group_id: groupId,
+            user_id: userId,
+            rotation_position: slotNumber,
+            status: 'active',
+            payment_status: 'paid',
+            has_paid_security_deposit: true,
+          },
+          {
+            onConflict: 'group_id,user_id',
+            ignoreDuplicates: false, // Update existing record instead of ignoring
+          }
+        );
 
       if (memberError) {
-        // Check if member already exists (duplicate insert)
-        if (memberError.code !== '23505') {
-          console.error('Error adding group member:', memberError);
-          return new Response(
-            JSON.stringify({ success: false, error: 'Failed to activate membership' }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+        console.error('Error adding/updating group member:', memberError);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to activate membership' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
 
-      // Update group current_members count atomically to avoid race conditions
-      // Try to use database function first for atomic increment
-      const { data: updatedGroup, error: rpcError } = await supabase
-        .rpc('increment_group_members', { group_id_param: groupId });
+      // NOTE: Group member count is automatically updated by database trigger
+      // The trigger 'update_group_members_count' increments current_members when:
+      // - A new member is inserted with status='active'
+      // - An existing member's status changes to 'active'
+      // This eliminates the need for manual counting and prevents race conditions
 
-      if (rpcError) {
-        // Fallback: If RPC function doesn't exist, use manual update
-        console.warn('RPC function not available, using fallback update:', rpcError);
-        
-        const { data: groupData, error: groupFetchError } = await supabase
+      // Update group status to 'active' if all members have joined
+      // Using eq filters makes this operation safe from race conditions:
+      // - Only updates if status is still 'forming'
+      // - Even if multiple payments complete simultaneously, all will set status to 'active' (idempotent)
+      // - The trigger ensures current_members is accurately maintained
+      const { data: groupData } = await supabase
+        .from('groups')
+        .select('total_members, current_members')
+        .eq('id', groupId)
+        .single();
+
+      if (groupData && groupData.current_members >= groupData.total_members) {
+        const { error: statusUpdateError } = await supabase
           .from('groups')
-          .select('total_members, current_members')
+          .update({ status: 'active' })
           .eq('id', groupId)
-          .single();
+          .eq('status', 'forming'); // Only update if still forming (race-safe)
 
-        if (!groupFetchError && groupData) {
-          const newMemberCount = (groupData.current_members || 0) + 1;
-          const newStatus = newMemberCount >= groupData.total_members ? 'active' : 'forming';
-
-          const { error: groupUpdateError } = await supabase
-            .from('groups')
-            .update({
-              current_members: newMemberCount,
-              status: newStatus,
-            })
-            .eq('id', groupId);
-
-          if (groupUpdateError) {
-            console.error('Error updating group:', groupUpdateError);
-          }
+        if (statusUpdateError) {
+          console.error('Error activating group:', statusUpdateError);
+          // Don't fail the request, group status update is non-critical for payment verification
         }
       }
 

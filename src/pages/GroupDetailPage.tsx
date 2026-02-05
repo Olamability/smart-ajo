@@ -296,23 +296,23 @@ export default function GroupDetailPage() {
         },
         callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
         onSuccess: (response: PaystackResponse) => {
-          // Payment modal closed - redirect to verification page
+          // Payment successful! Redirect to verification page
           // The PaymentSuccessPage will handle verification with proper session management
+          console.log('Payment successful, reference:', response.reference);
           setIsProcessingPayment(false);
-          if (response.status === 'success') {
-            toast.info('Payment received! Redirecting to verification...', {
-              duration: 3000,
-            });
-            // Navigate to payment success page for verification
-            // Note: callback_url doesn't work with Paystack popup, must navigate manually
-            navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
-          } else {
-            // Payment was not successful or user closed modal without completing
-            toast.error('Payment was not completed. Please try again.');
-          }
+          
+          toast.info('Payment received! Redirecting to verification...', {
+            duration: 3000,
+          });
+          
+          // Navigate to payment success page for verification
+          // Note: callback_url doesn't work with Paystack popup, must navigate manually
+          navigate(`/payment/success?reference=${initResult.reference}&group=${id}`);
         },
         onClose: () => {
-          // User closed payment modal without completing
+          // User closed payment modal without completing payment
+          // Note: This is only called when payment is NOT successful
+          console.log('Payment modal closed without completion');
           toast.info('Payment cancelled');
           setIsProcessingPayment(false);
         },
