@@ -59,8 +59,21 @@ fi
 
 echo ""
 
+# Deploy paystack-webhook edge function
+echo "2️⃣  Deploying paystack-webhook Edge Function..."
+supabase functions deploy paystack-webhook --no-verify-jwt
+
+if [ $? -eq 0 ]; then
+    echo "✅ paystack-webhook deployed successfully"
+else
+    echo "❌ Failed to deploy paystack-webhook"
+    exit 1
+fi
+
+echo ""
+
 # Deploy verify-bvn edge function
-echo "2️⃣  Deploying verify-bvn Edge Function..."
+echo "3️⃣  Deploying verify-bvn Edge Function..."
 supabase functions deploy verify-bvn
 
 if [ $? -eq 0 ]; then
@@ -134,8 +147,9 @@ echo "✅ Deployment Complete!"
 echo "======================="
 echo ""
 echo "📝 Deployed Edge Functions:"
-echo "  1. verify-payment - Paystack payment verification"
-echo "  2. verify-bvn     - BVN/KYC verification (optional)"
+echo "  1. verify-payment  - Paystack payment verification"
+echo "  2. paystack-webhook - Paystack webhook handler (real-time events)"
+echo "  3. verify-bvn      - BVN/KYC verification (optional)"
 echo ""
 echo "🧪 Test the Edge Functions:"
 echo ""
@@ -144,6 +158,9 @@ echo "  curl -i --location --request POST 'https://YOUR_PROJECT.supabase.co/func
 echo "    --header 'Authorization: Bearer YOUR_ANON_KEY' \\"
 echo "    --header 'Content-Type: application/json' \\"
 echo "    --data '{\"reference\":\"TEST_REFERENCE\"}'"
+echo ""
+echo "Webhook URL (configure in Paystack Dashboard):"
+echo "  https://YOUR_PROJECT.supabase.co/functions/v1/paystack-webhook"
 echo ""
 echo "BVN Verification (Test Mode):"
 echo "  Use test BVN: 22222222222 (always passes)"
