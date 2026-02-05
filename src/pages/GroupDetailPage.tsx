@@ -66,6 +66,9 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
+// Constants
+const DEFAULT_SLOT_POSITION = 1;
+
 interface JoinRequest {
   id: string;
   user_id: string;
@@ -1072,7 +1075,7 @@ export default function GroupDetailPage() {
                           <Button
                             size="sm"
                             variant="default"
-                            onClick={() => handleApproveRequest(request.id, request.preferred_slot || 1)}
+                            onClick={() => handleApproveRequest(request.id, request.preferred_slot || DEFAULT_SLOT_POSITION)}
                             disabled={processingRequestId === request.id}
                             className="whitespace-nowrap"
                           >
