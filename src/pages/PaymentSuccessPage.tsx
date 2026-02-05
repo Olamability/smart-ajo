@@ -15,7 +15,8 @@ import { verifyPaymentAndActivateMembership } from '@/api/payments';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, Loader2, XCircle, ArrowRight } from 'lucide-react';
+import { CheckCircle, Loader2, XCircle, ArrowRight, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,8 @@ export default function PaymentSuccessPage() {
   const [verifying, setVerifying] = useState(true);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [canRetry, setCanRetry] = useState(false);
   
   const reference = searchParams.get('reference');
   const groupId = searchParams.get('group');
@@ -33,6 +36,7 @@ export default function PaymentSuccessPage() {
       if (!reference) {
         setError('No payment reference provided');
         setVerifying(false);
+        setCanRetry(false);
         return;
       }
 
@@ -46,35 +50,69 @@ export default function PaymentSuccessPage() {
       if (!isAuthenticated) {
         setError('Please log in to verify your payment');
         setVerifying(false);
+        setCanRetry(true);
         return;
       }
 
       try {
         console.log('PaymentSuccessPage: Verifying payment with reference:', reference);
+        setVerifying(true);
+        setError(null);
+        
         const result = await verifyPaymentAndActivateMembership(reference);
         
         if (result.success && result.verified) {
           setVerified(true);
+          setCanRetry(false);
+          toast.success('Payment verified successfully! Membership activated.');
         } else {
           setError(result.error || 'Payment verification failed');
+          setCanRetry(true);
+          
+          // Auto-retry once after 2 seconds if it's a network or session issue
+          if (retryCount < 1 && (
+            result.error?.includes('Session not available') || 
+            result.error?.includes('network') ||
+            result.error?.includes('timeout')
+          )) {
+            console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
+            setTimeout(() => {
+              setRetryCount(prev => prev + 1);
+            }, 2000);
+          }
         }
       } catch (err) {
         console.error('PaymentSuccessPage: Verification error:', err);
-        setError(err instanceof Error ? err.message : 'An error occurred');
+        const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+        setError(errorMessage);
+        setCanRetry(true);
+        
+        // Auto-retry once after 2 seconds for network errors
+        if (retryCount < 1) {
+          console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+          }, 2000);
+        }
       } finally {
         setVerifying(false);
       }
     };
 
     verifyPayment();
-  }, [reference, authLoading, isAuthenticated]);
+  }, [reference, authLoading, isAuthenticated, retryCount]);
 
   const handleContinue = () => {
     if (groupId) {
-      navigate(`/groups/${groupId}?reload=true`);
+      // Use window.location.href for full page reload to ensure fresh data
+      window.location.href = `/groups/${groupId}`;
     } else {
-      navigate('/dashboard');
+      window.location.href = '/dashboard';
     }
+  };
+
+  const handleRetry = () => {
+    setRetryCount(prev => prev + 1);
   };
 
   return (
@@ -114,14 +152,28 @@ export default function PaymentSuccessPage() {
           )}
 
           {!verifying && (
-            <Button
-              onClick={handleContinue}
-              className="w-full"
-              variant={verified ? 'default' : 'outline'}
-            >
-              {verified ? 'Go to Group' : 'Return to Dashboard'}
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                onClick={handleContinue}
+                className="w-full"
+                variant={verified ? 'default' : 'outline'}
+              >
+                {verified ? 'Go to Group' : 'Return to Dashboard'}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              
+              {!verified && canRetry && (
+                <Button
+                  onClick={handleRetry}
+                  className="w-full mt-2"
+                  variant="secondary"
+                  disabled={verifying}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry Verification
+                </Button>
+              )}
+            </>
           )}
 
           {verifying && (

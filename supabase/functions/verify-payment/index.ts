@@ -60,9 +60,12 @@ serve(async (req) => {
   }
 
   try {
+    console.log('Payment verification request received');
+    
     // Get Paystack secret key from environment
     const paystackSecretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!paystackSecretKey) {
+      console.error('PAYSTACK_SECRET_KEY not configured');
       throw new Error('Paystack secret key not configured');
     }
 
@@ -70,17 +73,21 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Supabase credentials not configured');
       throw new Error('Supabase credentials not configured');
     }
 
     // Parse request body
     const { reference } = await req.json();
     if (!reference) {
+      console.error('Payment reference not provided');
       return new Response(
         JSON.stringify({ success: false, error: 'Payment reference is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log(`Verifying payment with reference: ${reference}`);
 
     // Verify payment with Paystack
     const paystackResponse = await fetch(
@@ -96,7 +103,7 @@ serve(async (req) => {
 
     if (!paystackResponse.ok) {
       const errorData = await paystackResponse.json();
-      console.error('Paystack verification failed:', errorData);
+      console.error('Paystack verification failed:', JSON.stringify(errorData));
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -108,9 +115,11 @@ serve(async (req) => {
     }
 
     const verificationData: PaystackVerificationResponse = await paystackResponse.json();
+    console.log(`Paystack verification response - status: ${verificationData.data.status}`);
 
     // Check if payment was successful
     if (!verificationData.status || verificationData.data.status !== 'success') {
+      console.error(`Payment not successful - status: ${verificationData.data.status}`);
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -131,7 +140,10 @@ serve(async (req) => {
     const paymentType = metadata.paymentType;
     const slotNumber = metadata.slotNumber;
 
+    console.log(`Processing payment - Type: ${paymentType}, User: ${userId}, Group: ${groupId}`);
+
     if (!userId || !groupId) {
+      console.error('Invalid payment metadata - missing userId or groupId');
       return new Response(
         JSON.stringify({ success: false, error: 'Invalid payment metadata' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -139,6 +151,7 @@ serve(async (req) => {
     }
 
     // Update transaction record to 'completed'
+    console.log('Updating transaction record to completed');
     const { error: transactionUpdateError } = await supabase
       .from('transactions')
       .update({
@@ -155,15 +168,19 @@ serve(async (req) => {
       .eq('reference', reference);
 
     if (transactionUpdateError) {
-      console.error('Error updating transaction record:', transactionUpdateError);
+      console.error('Error updating transaction record:', JSON.stringify(transactionUpdateError));
       return new Response(
         JSON.stringify({ success: false, error: 'Failed to update transaction record' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
+    console.log('Transaction record updated successfully');
+
     // Handle different payment types
     if (paymentType === 'group_creation' || paymentType === 'group_join') {
+      console.log(`Processing ${paymentType} payment for slot ${slotNumber}`);
+      
       // Add or update user as group member with selected slot
       // Use upsert to handle both new members (group_creation) and existing pending members (group_join)
       const { error: memberError } = await supabase
@@ -184,18 +201,14 @@ serve(async (req) => {
         );
 
       if (memberError) {
-        console.error('Error adding/updating group member:', memberError);
+        console.error('Error adding/updating group member:', JSON.stringify(memberError));
         return new Response(
           JSON.stringify({ success: false, error: 'Failed to activate membership' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      // NOTE: Group member count is automatically updated by database trigger
-      // The trigger 'update_group_members_count' increments current_members when:
-      // - A new member is inserted with status='active'
-      // - An existing member's status changes to 'active'
-      // This eliminates the need for manual counting and prevents race conditions
+      console.log('Group member added/updated successfully');
 
       // Update group status to 'active' if all members have joined
       // Using eq filters makes this operation safe from race conditions:
@@ -209,6 +222,7 @@ serve(async (req) => {
         .single();
 
       if (groupData && groupData.current_members >= groupData.total_members) {
+        console.log(`Group is full (${groupData.current_members}/${groupData.total_members}), activating group`);
         const { error: statusUpdateError } = await supabase
           .from('groups')
           .update({ status: 'active' })
@@ -216,13 +230,18 @@ serve(async (req) => {
           .eq('status', 'forming'); // Only update if still forming (race-safe)
 
         if (statusUpdateError) {
-          console.error('Error activating group:', statusUpdateError);
+          console.error('Error activating group:', JSON.stringify(statusUpdateError));
           // Don't fail the request, group status update is non-critical for payment verification
+        } else {
+          console.log('Group status updated to active');
         }
+      } else {
+        console.log(`Group not yet full (${groupData?.current_members}/${groupData?.total_members})`);
       }
 
       // Update join request status if it's a join payment
       if (paymentType === 'group_join') {
+        console.log('Updating join request status to paid');
         const { error: requestUpdateError } = await supabase
           .from('group_join_requests')
           .update({ 
@@ -233,20 +252,27 @@ serve(async (req) => {
           .eq('group_id', groupId);
 
         if (requestUpdateError) {
-          console.error('Error updating join request:', requestUpdateError);
+          console.error('Error updating join request:', JSON.stringify(requestUpdateError));
+        } else {
+          console.log('Join request updated successfully');
         }
       }
     } else if (paymentType === 'contribution') {
+      console.log('Processing contribution payment');
+      
       // Update existing contribution record to mark as paid
       const contributionId = metadata.contributionId;
       
       if (!contributionId) {
+        console.error('Contribution ID missing in metadata');
         return new Response(
           JSON.stringify({ success: false, error: 'Contribution ID required for contribution payment' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
+      console.log(`Updating contribution ${contributionId} to paid`);
+      
       // Update the contribution record to mark it as paid
       const { error: contributionError } = await supabase
         .from('contributions')
@@ -258,12 +284,14 @@ serve(async (req) => {
         .eq('id', contributionId);
 
       if (contributionError) {
-        console.error('Error updating contribution:', contributionError);
+        console.error('Error updating contribution:', JSON.stringify(contributionError));
         return new Response(
           JSON.stringify({ success: false, error: 'Failed to record contribution' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      console.log('Contribution updated successfully');
 
       // Check if all members have contributed for this cycle
       // First get the contribution to find group and cycle info
@@ -306,6 +334,7 @@ serve(async (req) => {
     }
 
     // Return success response
+    console.log('Payment verification completed successfully');
     return new Response(
       JSON.stringify({
         success: true,
