@@ -254,8 +254,10 @@ export default function GroupDetailPage() {
 
     setIsProcessingPayment(true);
     try {
-      // Calculate total amount (security deposit + first contribution)
-      const totalAmount = group.securityDepositAmount + group.contributionAmount;
+      // Calculate total amount (security deposit + first contribution + service fee)
+      const serviceFeePercentage = group.serviceFeePercentage || 2;
+      const serviceFee = (group.contributionAmount * serviceFeePercentage) / 100;
+      const totalAmount = group.securityDepositAmount + group.contributionAmount + serviceFee;
 
       // Initialize payment record based on whether user is creator or regular member
       // For joiners: pass the preferred_slot from their join request to ensure metadata consistency
@@ -559,7 +561,11 @@ export default function GroupDetailPage() {
                       ) : (
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
-                          Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)} to Activate Group
+                          Pay {formatCurrency(
+                            group.securityDepositAmount + 
+                            group.contributionAmount + 
+                            (group.contributionAmount * (group.serviceFeePercentage || 2) / 100)
+                          )} to Activate Group
                         </>
                       )}
                     </Button>
@@ -619,7 +625,11 @@ export default function GroupDetailPage() {
                   ) : (
                     <>
                       <CreditCard className="w-4 h-4 mr-2" />
-                      Pay {formatCurrency(group.securityDepositAmount + group.contributionAmount)} to Join
+                      Pay {formatCurrency(
+                        group.securityDepositAmount + 
+                        group.contributionAmount + 
+                        (group.contributionAmount * (group.serviceFeePercentage || 2) / 100)
+                      )} to Join
                     </>
                   )}
                 </Button>

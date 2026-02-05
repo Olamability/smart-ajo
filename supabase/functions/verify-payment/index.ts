@@ -138,20 +138,23 @@ serve(async (req) => {
       );
     }
 
-    // Update payment record to 'paid'
-    const { error: paymentUpdateError } = await supabase
-      .from('payments')
+    // Update transaction record to 'completed'
+    const { error: transactionUpdateError } = await supabase
+      .from('transactions')
       .update({
-        status: 'paid',
-        verified_at: new Date().toISOString(),
-        paystack_response: paymentData,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        metadata: {
+          ...metadata,
+          paystack_response: paymentData,
+        },
       })
       .eq('reference', reference);
 
-    if (paymentUpdateError) {
-      console.error('Error updating payment record:', paymentUpdateError);
+    if (transactionUpdateError) {
+      console.error('Error updating transaction record:', transactionUpdateError);
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to update payment record' }),
+        JSON.stringify({ success: false, error: 'Failed to update transaction record' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

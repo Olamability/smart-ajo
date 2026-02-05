@@ -97,12 +97,12 @@ export const initializeGroupCreationPayment = async (
 
     // Record payment intent in database
     const { error: recordError } = await supabase
-      .from('payments')
+      .from('transactions')
       .insert({
         user_id: user.id,
         group_id: groupId,
         amount: amount,
-        payment_type: 'group_creation',
+        type: 'contribution',
         status: 'pending',
         reference: reference,
         metadata: {
@@ -147,12 +147,12 @@ export const initializeGroupJoinPayment = async (
 
     // Record payment intent in database
     const { error: recordError } = await supabase
-      .from('payments')
+      .from('transactions')
       .insert({
         user_id: user.id,
         group_id: groupId,
         amount: amount,
-        payment_type: 'group_join',
+        type: 'contribution',
         status: 'pending',
         reference: reference,
         metadata: {
@@ -197,13 +197,12 @@ export const initializeContributionPayment = async (
 
     // Record payment intent in database
     const { error: recordError } = await supabase
-      .from('payments')
+      .from('transactions')
       .insert({
         user_id: user.id,
         group_id: groupId,
-        cycle_id: cycleId,
         amount: amount,
-        payment_type: 'contribution',
+        type: 'contribution',
         status: 'pending',
         reference: reference,
         metadata: {
@@ -338,7 +337,7 @@ export const getUserPayments = async (): Promise<Record<string, unknown>[]> => {
     }
 
     const { data, error } = await supabase
-      .from('payments')
+      .from('transactions')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
@@ -362,7 +361,7 @@ export const getPaymentByReference = async (reference: string): Promise<Record<s
     const supabase = createClient();
 
     const { data, error } = await supabase
-      .from('payments')
+      .from('transactions')
       .select('*')
       .eq('reference', reference)
       .single();
