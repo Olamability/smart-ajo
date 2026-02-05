@@ -7,6 +7,7 @@ import {
   ReactNode,
 } from 'react';
 import { createClient } from '@/lib/client/supabase';
+import type { Session } from '@supabase/supabase-js';
 import { User } from '@/types';
 import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
@@ -178,7 +179,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const loadUserProfile = async (
     userId: string, 
     force: boolean = false,
-    existingSession?: { user: { id: string } } | null
+    existingSession?: Session | null
   ): Promise<boolean> => {
     if (!force && isLoadingProfileRef.current) return false;
     if (!force && userRef.current?.id === userId) return true;
@@ -187,18 +188,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isLoadingProfileRef.current = true;
       console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}${existingSession ? ' (using provided session)' : ''}`);
       
+      // Validate session (either provided or fetched)
+      let session: Session | null = null;
+      
       // If we have an existing session passed in, use it directly (e.g., from login)
       // This avoids race conditions where getSession() might not immediately reflect the new session
       if (existingSession) {
         if (existingSession.user.id !== userId) {
           throw new Error('Session user mismatch');
         }
+        session = existingSession;
         console.log('loadUserProfile: Using provided session, skipping session verification');
       } else {
         // Only verify session if one wasn't provided
         // Retry session check with backoff - session might be restoring after redirect
-        let session = null;
-        
         for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
           
