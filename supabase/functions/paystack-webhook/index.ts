@@ -71,6 +71,9 @@ function verifyWebhookSignature(
   return hash === signature;
 }
 
+/** Paystack amounts are denominated in kobo (smallest NGN unit); 100 kobo = 1 naira */
+const KOBO_TO_NAIRA_DIVISOR = 100;
+
 /**
  * Process payment success event
  */
@@ -93,6 +96,18 @@ async function processPaymentSuccess(
   if (!userId || !groupId) {
     console.error('Invalid payment metadata:', metadata);
     return { success: false, error: 'Invalid payment metadata' };
+  }
+
+  // Idempotency check: if the transaction is already completed, skip re-processing
+  const { data: existingTransaction } = await supabase
+    .from('transactions')
+    .select('status')
+    .eq('reference', reference)
+    .single();
+
+  if (existingTransaction?.status === 'completed') {
+    console.log(`Payment ${reference} already processed — skipping duplicate webhook`);
+    return { success: true, reference, status: 'already_processed' };
   }
 
   // Update transaction record to 'completed'
@@ -185,11 +200,26 @@ async function processPaymentSuccess(
         paid_date: new Date().toISOString(),
         transaction_ref: reference,
       })
-      .eq('id', contributionId);
+      .eq('id', contributionId)
+      .eq('user_id', userId); // Extra safety: only update own contribution
 
     if (contributionError) {
       console.error('Error updating contribution:', contributionError);
       return { success: false, error: 'Failed to record contribution' };
+    }
+
+    // Update group balance (total_collected)
+    const contributionAmountNaira = amount / KOBO_TO_NAIRA_DIVISOR;
+    console.log(`Incrementing group ${groupId} total_collected by ${contributionAmountNaira}`);
+
+    const { error: balanceUpdateError } = await supabase.rpc('increment_group_total_collected', {
+      p_group_id: groupId,
+      p_amount: contributionAmountNaira,
+    });
+
+    if (balanceUpdateError) {
+      console.error('Error updating group balance:', balanceUpdateError);
+      return { success: false, error: 'Failed to update group balance' };
     }
 
     // Check if all members have contributed for this cycle
