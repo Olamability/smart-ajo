@@ -376,6 +376,7 @@ CREATE TABLE transactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
+  contribution_id UUID REFERENCES contributions(id) ON DELETE SET NULL,
   
   type transaction_type_enum NOT NULL,
   amount DECIMAL(15, 2) NOT NULL,
@@ -402,6 +403,7 @@ CREATE TABLE transactions (
 -- Indexes for transactions table
 CREATE INDEX idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX idx_transactions_group_id ON transactions(group_id);
+CREATE INDEX idx_transactions_contribution_id ON transactions(contribution_id);
 CREATE INDEX idx_transactions_type ON transactions(type);
 CREATE INDEX idx_transactions_status ON transactions(status);
 CREATE INDEX idx_transactions_reference ON transactions(reference);
