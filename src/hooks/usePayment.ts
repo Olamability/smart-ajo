@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   initializeGroupCreationPayment,
   initializeGroupJoinPayment,
-  initializeContributionPayment,
+  initializeAjoContributionPayment,
 } from '@/api/payments';
 import { paystackService } from '@/lib/paystack';
 import type { PaymentMetadata } from '@/lib/paystack';
@@ -81,11 +81,12 @@ export function usePayment(): UsePaymentReturn {
           params.slotNumber
         );
       } else {
-        initResult = await initializeContributionPayment(
-          params.groupId,
-          params.contributionId,
-          params.amount
-        );
+        initResult = await initializeAjoContributionPayment({
+          email: user.email,
+          amountInKobo: paystackService.toKobo(params.amount),
+          ajoGroupId: params.groupId,
+          contributionId: params.contributionId,
+        });
       }
 
       if (!initResult.success || !initResult.reference) {
