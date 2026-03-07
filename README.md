@@ -2,6 +2,9 @@
 
 A modern web application for managing rotating savings groups (Ajo/Esusu) with complete transparency, automated escrow, enforced contributions, and guaranteed payouts.
 
+> 📦 **Tech Stack:** React 18 · TypeScript · Vite · Supabase (PostgreSQL + Auth + Edge Functions) · Tailwind CSS · Shadcn UI · Paystack · Vercel  
+> See [TECH_STACK.md](./TECH_STACK.md) for a full breakdown.
+
 ## ⚡ Payment Integration Status
 
 **✅ FULLY IMPLEMENTED** - Payment system is production-ready and complete.
