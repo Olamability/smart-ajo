@@ -176,6 +176,64 @@ export const initializeGroupJoinPayment = async (
 };
 
 /**
+ * Initialize Paystack payment for an Ajo contribution.
+ *
+ * @param params.email - User email address for Paystack
+ * @param params.amountInKobo - Contribution amount in kobo (smallest currency unit)
+ * @param params.ajoGroupId - The Ajo group ID
+ * @param params.contributionId - The contribution record ID to update after payment
+ * @returns PaymentInitializationResult with a unique reference on success
+ */
+export const initializeAjoContributionPayment = async (params: {
+  email: string;
+  amountInKobo: number;
+  ajoGroupId: string;
+  contributionId: string;
+}): Promise<PaymentInitializationResult> => {
+  const { amountInKobo, ajoGroupId, contributionId } = params;
+  try {
+    const supabase = createClient();
+
+    // Get current user for user_id
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    // Generate unique payment reference
+    const reference = generateReference();
+
+    // Record payment intent in database
+    const { error: recordError } = await supabase
+      .from('transactions')
+      .insert({
+        user_id: user.id,
+        group_id: ajoGroupId,
+        amount: amountInKobo,
+        type: 'contribution',
+        status: 'pending',
+        reference,
+        metadata: {
+          userId: user.id,
+          groupId: ajoGroupId,
+          paymentType: 'contribution',
+          contributionId,
+        },
+      });
+
+    if (recordError) {
+      console.error('Error recording Ajo contribution payment intent:', recordError);
+      return { success: false, error: 'Failed to initialize payment' };
+    }
+
+    return { success: true, reference };
+  } catch (error) {
+    console.error('Error initializing Ajo contribution payment:', error);
+    return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
+  }
+};
+
+/**
  * Initialize payment for contribution cycle
  * @param groupId - The group ID
  * @param contributionId - The contribution record ID to update after payment
