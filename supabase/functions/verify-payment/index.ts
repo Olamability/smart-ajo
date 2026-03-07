@@ -133,6 +133,26 @@ serve(async (req) => {
     // Initialize Supabase client with service role key (bypasses RLS)
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Idempotency check: if the transaction is already completed, return success immediately
+    // This prevents double-processing when the endpoint is retried after a transient error
+    const { data: existingTransaction } = await supabase
+      .from('transactions')
+      .select('status')
+      .eq('reference', reference)
+      .single();
+
+    if (existingTransaction?.status === 'completed') {
+      console.log(`Payment ${reference} already processed — returning cached success`);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          verified: true,
+          data: { reference, alreadyProcessed: true },
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const paymentData = verificationData.data;
     const metadata = paymentData.metadata || {};
     const userId = metadata.userId;

@@ -6,9 +6,9 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getGroupContributions, initializeContributionPayment } from '@/api';
+import { getGroupContributions } from '@/api';
 import type { Contribution } from '@/types';
-import { initiatePaystackPayment } from '@/lib/paystack';
+import { usePayment } from '@/hooks/usePayment';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -25,18 +25,18 @@ import { format } from 'date-fns';
 interface ContributionsListProps {
   groupId: string;
   groupName: string;
-  contributionAmount: number;
 }
 
 export default function ContributionsList({
   groupId,
   groupName,
-  contributionAmount,
 }: ContributionsListProps) {
   const { user } = useAuth();
+  const { initiatePayment, isProcessing } = usePayment();
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [loading, setLoading] = useState(true);
-  const [processingPayment, setProcessingPayment] = useState<string | null>(null);
+  // Track which contribution is being paid so only its button shows loading
+  const [payingContributionId, setPayingContributionId] = useState<string | null>(null);
 
   useEffect(() => {
     loadContributions();
@@ -63,53 +63,19 @@ export default function ContributionsList({
   };
 
   const handlePayContribution = async (contribution: Contribution) => {
-    if (!user) return;
+    if (!user || isProcessing) return;
 
-    setProcessingPayment(contribution.id);
-    
-    try {
-      // Initialize payment record in database
-      // Note: contribution.id is the ID of the contribution record we need to update after payment
-      const result = await initializeContributionPayment(
-        groupId,
-        contribution.id, // This is the contribution ID, which will be used to update the right record
-        contribution.amount
-      );
-      
-      if (!result.success || !result.reference) {
-        toast.error(result.error || 'Failed to initialize payment');
-        setProcessingPayment(null);
-        return;
-      }
-
-      // Open Paystack payment popup using centralized service
-      await initiatePaystackPayment({
-        email: user.email || '',
-        amount: contribution.amount,
-        reference: result.reference,
-        metadata: {
-          userId: user.id,
-          groupId: groupId,
-          paymentType: 'contribution',
-          contributionId: contribution.id, // Store the contribution ID to update after payment
-          cycleNumber: contribution.cycleNumber, // Also store cycle number for reference
-        },
-        onSuccess: () => {
-          // Redirect to payment success page for verification
-          // Include group ID so user can navigate back to group after verification
-          window.location.href = `/payment/success?reference=${result.reference}&type=contribution&group=${groupId}`;
-        },
-        onClose: () => {
-          toast.info('Payment cancelled');
-          setProcessingPayment(null);
-        },
-      });
-      
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to initialize payment');
-      setProcessingPayment(null);
-    }
+    setPayingContributionId(contribution.id);
+    await initiatePayment({
+      type: 'contribution',
+      groupId,
+      contributionId: contribution.id,
+      amount: contribution.amount,
+      cycleNumber: contribution.cycleNumber,
+    });
+    // Clear the per-contribution indicator once the hook finishes
+    // (fires when popup closes without payment; on success the page redirects away)
+    setPayingContributionId(null);
   };
 
   const getStatusColor = (status: string) => {
@@ -218,10 +184,10 @@ export default function ContributionsList({
             {contribution.status === 'pending' && (
               <Button
                 onClick={() => handlePayContribution(contribution)}
-                disabled={processingPayment === contribution.id}
+                disabled={isProcessing}
                 className="w-full"
               >
-                {processingPayment === contribution.id ? (
+                {isProcessing && payingContributionId === contribution.id ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing...
@@ -243,11 +209,11 @@ export default function ContributionsList({
                 </div>
                 <Button
                   onClick={() => handlePayContribution(contribution)}
-                  disabled={processingPayment === contribution.id}
+                  disabled={isProcessing}
                   variant="destructive"
                   className="w-full"
                 >
-                  {processingPayment === contribution.id ? (
+                  {isProcessing && payingContributionId === contribution.id ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Processing...

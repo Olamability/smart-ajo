@@ -10,12 +10,8 @@ import {
   rejectJoinRequest,
   getUserJoinRequestStatus,
 } from '@/api';
-import {
-  initializeGroupCreationPayment,
-  initializeGroupJoinPayment,
-} from '@/api/payments';
 import type { Group, GroupMember } from '@/types';
-import { paystackService, PaystackResponse } from '@/lib/paystack';
+import { usePayment } from '@/hooks/usePayment';
 import ContributionsList from '@/components/ContributionsList';
 import PayoutSchedule from '@/components/PayoutSchedule';
 import SlotSelector from '@/components/SlotSelector';
@@ -86,11 +82,11 @@ export default function GroupDetailPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { initiatePayment, isProcessing: isProcessingPayment } = usePayment();
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreator, setIsCreator] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [currentUserMember, setCurrentUserMember] = useState<GroupMember | null>(null);
   const [isJoining, setIsJoining] = useState(false);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
@@ -120,9 +116,6 @@ export default function GroupDetailPage() {
       if (import.meta.env.DEV) {
         console.log('Reloading data after payment verification...');
       }
-      
-      // Reset payment processing state
-      setIsProcessingPayment(false);
       
       // Reload all data to reflect updated membership status
       loadGroupDetails();
@@ -258,69 +251,26 @@ export default function GroupDetailPage() {
       return;
     }
 
-    setIsProcessingPayment(true);
-    try {
-      // Calculate total amount (security deposit + first contribution + service fee)
-      const serviceFeePercentage = group.serviceFeePercentage || 2;
-      const serviceFee = (group.contributionAmount * serviceFeePercentage) / 100;
-      const totalAmount = group.securityDepositAmount + group.contributionAmount + serviceFee;
+    // Calculate total amount (security deposit + first contribution + service fee)
+    const serviceFeePercentage = group.serviceFeePercentage || 2;
+    const serviceFee = (group.contributionAmount * serviceFeePercentage) / 100;
+    const totalAmount = group.securityDepositAmount + group.contributionAmount + serviceFee;
 
-      // Initialize payment record based on whether user is creator or regular member
-      // For joiners: pass the preferred_slot from their join request to ensure metadata consistency
-      const initResult = isCreator 
-        ? await initializeGroupCreationPayment(id, totalAmount, selectedSlot)
-        : await initializeGroupJoinPayment(id, totalAmount, userJoinRequest?.preferred_slot);
-      
-      if (!initResult.success || !initResult.reference) {
-        toast.error(initResult.error || 'Failed to initialize payment');
-        setIsProcessingPayment(false);
-        return;
-      }
-
-      // Get preferred slot for Paystack metadata: from selectedSlot for creators, from join request for joiners
-      // CRITICAL: For joiners, they're not yet members, so we get the slot from their join request
-      const preferredSlot = isCreator ? selectedSlot : (userJoinRequest?.preferred_slot || 1);
-
-      // Open Paystack payment popup
-      // Note: callback_url parameter is provided but doesn't work with Paystack's popup/inline flow
-      // Manual navigation is handled in the onSuccess callback instead
-      await paystackService.initializePayment({
-        email: user.email!,
-        amount: paystackService.toKobo(totalAmount), // Convert to kobo
-        reference: initResult.reference,
-        metadata: {
-          paymentType: isCreator ? 'group_creation' : 'group_join',
-          groupId: id,
-          userId: user.id,
-          slotNumber: preferredSlot,
-        },
-        callback_url: `${import.meta.env.VITE_APP_URL}/payment/success?reference=${initResult.reference}&group=${id}`,
-        onSuccess: (response: PaystackResponse) => {
-          // Payment successful! Redirect to verification page
-          // The PaymentSuccessPage will handle verification with proper session management
-          console.log('Payment successful, reference:', response.reference);
-          
-          toast.success('Payment completed! Verifying...', {
-            duration: 2000,
-          });
-          
-          // Use window.location.href for full page reload to ensure proper session restoration
-          // This is more reliable than navigate() after payment redirect
-          // Keep isProcessingPayment true until we navigate away
-          window.location.href = `/payment/success?reference=${initResult.reference}&group=${id}`;
-        },
-        onClose: () => {
-          // User closed payment modal without completing payment
-          // Note: This is only called when payment is NOT successful
-          console.log('Payment modal closed without completion');
-          toast.info('Payment cancelled');
-          setIsProcessingPayment(false);
-        },
+    if (isCreator) {
+      await initiatePayment({
+        type: 'group_creation',
+        groupId: id,
+        amount: totalAmount,
+        slotNumber: selectedSlot,
       });
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to initialize payment');
-      setIsProcessingPayment(false);
+    } else {
+      const preferredSlot = userJoinRequest?.preferred_slot || 1;
+      await initiatePayment({
+        type: 'group_join',
+        groupId: id,
+        amount: totalAmount,
+        slotNumber: preferredSlot,
+      });
     }
   };
 
@@ -1207,7 +1157,6 @@ export default function GroupDetailPage() {
               <ContributionsList
                 groupId={group.id}
                 groupName={group.name}
-                contributionAmount={group.contributionAmount}
               />
             )}
           </TabsContent>
