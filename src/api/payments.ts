@@ -386,6 +386,62 @@ export const verifyPaymentAndRecordContribution = async (
 };
 
 /**
+ * Verify a contribution payment via the dedicated verify-contribution Edge Function.
+ *
+ * This calls the `/verify-contribution` endpoint which:
+ * 1. Verifies the payment reference with Paystack
+ * 2. Marks the transaction as completed
+ * 3. Marks the contribution as paid
+ * 4. Updates the group balance (total_collected)
+ *
+ * @param reference - The Paystack payment reference to verify
+ */
+export const verifyContributionPayment = async (
+  reference: string
+): Promise<PaymentVerificationResult> => {
+  try {
+    console.log('verifyContributionPayment: Starting verification for reference:', reference);
+
+    // Ensure session is available before attempting verification
+    const sessionAvailable = await ensureSessionAvailable();
+    if (!sessionAvailable) {
+      console.error('verifyContributionPayment: Session not available');
+      return { success: false, error: 'Session not available. Please try refreshing the page or logging in again.' };
+    }
+
+    const supabase = createClient();
+
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    console.log('verifyContributionPayment: Calling verify-contribution function');
+    // Call the dedicated verify-contribution Edge Function
+    const { data, error } = await supabase.functions.invoke('verify-contribution', {
+      body: { reference },
+    });
+
+    if (error) {
+      console.error('verifyContributionPayment: Error verifying contribution payment:', error);
+      return { success: false, error: error.message };
+    }
+
+    if (!data.success) {
+      console.error('verifyContributionPayment: Contribution payment verification failed:', data.error);
+      return { success: false, error: data.error || 'Contribution payment verification failed' };
+    }
+
+    console.log('verifyContributionPayment: Contribution payment verified successfully');
+    return { success: true, verified: true, data: data.data };
+  } catch (error) {
+    console.error('verifyContributionPayment: Error in contribution payment verification:', error);
+    return { success: false, error: getErrorMessage(error, 'Contribution payment verification failed') };
+  }
+};
+
+/**
  * Get payment history for a user
  */
 export const getUserPayments = async (): Promise<Record<string, unknown>[]> => {
