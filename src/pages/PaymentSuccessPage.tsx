@@ -1,17 +1,21 @@
 /**
  * Payment Success Page
- * 
- * Handles payment verification after successful Paystack payment.
- * This page is called after payment completion to verify the transaction
- * and activate user's membership in the group.
- * 
+ *
+ * Handles payment verification after a successful Paystack payment.
+ * Supports two payment types via the `?type=` URL parameter:
+ *   - (default) membership payments: group_creation / group_join
+ *   - contribution payments: ?type=contribution
+ *
  * Note: After Paystack redirect, session restoration may take a moment.
  * We wait for auth context to be ready before attempting verification.
  */
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { verifyPaymentAndActivateMembership } from '@/api/payments';
+import {
+  verifyPaymentAndActivateMembership,
+  verifyPaymentAndRecordContribution,
+} from '@/api/payments';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,9 +30,12 @@ export default function PaymentSuccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [canRetry, setCanRetry] = useState(false);
-  
+
   const reference = searchParams.get('reference');
   const groupId = searchParams.get('group');
+  const paymentType = searchParams.get('type'); // 'contribution' or absent for membership
+
+  const isContribution = paymentType === 'contribution';
 
   useEffect(() => {
     const verifyPayment = async () => {
@@ -39,8 +46,8 @@ export default function PaymentSuccessPage() {
         return;
       }
 
-      // Wait for auth context to be ready after redirect
-      // This ensures session is fully restored before attempting verification
+      // Wait for auth context to be ready after redirect.
+      // This ensures session is fully restored before attempting verification.
       if (authLoading) {
         console.log('PaymentSuccessPage: Waiting for auth context to be ready...');
         return;
@@ -54,29 +61,36 @@ export default function PaymentSuccessPage() {
       }
 
       try {
-        console.log('PaymentSuccessPage: Verifying payment with reference:', reference);
+        console.log('PaymentSuccessPage: Verifying payment with reference:', reference, 'type:', paymentType);
         setVerifying(true);
         setError(null);
-        
-        const result = await verifyPaymentAndActivateMembership(reference);
-        
+
+        // Route to the correct verification function based on payment type
+        const result = isContribution
+          ? await verifyPaymentAndRecordContribution(reference)
+          : await verifyPaymentAndActivateMembership(reference);
+
         if (result.success && result.verified) {
           setVerified(true);
           setCanRetry(false);
-          toast.success('Payment verified successfully! Membership activated.');
+          const successMsg = isContribution
+            ? 'Payment verified! Your contribution has been recorded.'
+            : 'Payment verified successfully! Membership activated.';
+          toast.success(successMsg);
         } else {
           setError(result.error || 'Payment verification failed');
           setCanRetry(true);
-          
-          // Auto-retry once after 2 seconds if it's a network or session issue
-          if (retryCount < 1 && (
-            result.error?.includes('Session not available') || 
-            result.error?.includes('network') ||
-            result.error?.includes('timeout')
-          )) {
+
+          // Auto-retry once after 2 seconds for transient errors
+          if (
+            retryCount < 1 &&
+            (result.error?.includes('Session not available') ||
+              result.error?.includes('network') ||
+              result.error?.includes('timeout'))
+          ) {
             console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
             setTimeout(() => {
-              setRetryCount(prev => prev + 1);
+              setRetryCount((prev) => prev + 1);
             }, 2000);
           }
         }
@@ -85,12 +99,12 @@ export default function PaymentSuccessPage() {
         const errorMessage = err instanceof Error ? err.message : 'An error occurred';
         setError(errorMessage);
         setCanRetry(true);
-        
+
         // Auto-retry once after 2 seconds for network errors
         if (retryCount < 1) {
           console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
           setTimeout(() => {
-            setRetryCount(prev => prev + 1);
+            setRetryCount((prev) => prev + 1);
           }, 2000);
         }
       } finally {
@@ -99,11 +113,11 @@ export default function PaymentSuccessPage() {
     };
 
     verifyPayment();
-  }, [reference, authLoading, isAuthenticated, retryCount]);
+  }, [reference, authLoading, isAuthenticated, retryCount, isContribution, paymentType]);
 
   const handleContinue = () => {
     if (groupId) {
-      // Use window.location.href for full page reload to ensure fresh data
+      // Full page reload so the group page fetches fresh data
       window.location.href = `/groups/${groupId}`;
     } else {
       window.location.href = '/dashboard';
@@ -111,8 +125,22 @@ export default function PaymentSuccessPage() {
   };
 
   const handleRetry = () => {
-    setRetryCount(prev => prev + 1);
+    setRetryCount((prev) => prev + 1);
   };
+
+  const successDescription = isContribution
+    ? 'Your contribution has been recorded'
+    : 'Your membership has been activated';
+
+  const successBody = isContribution
+    ? 'Your contribution payment has been verified and recorded. Thank you for keeping up with your savings!'
+    : 'Your payment has been verified and your membership has been activated. You can now participate in group activities.';
+
+  const continueLabel = groupId
+    ? isContribution
+      ? 'Back to Group'
+      : 'Go to Group'
+    : 'Go to Dashboard';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -130,7 +158,7 @@ export default function PaymentSuccessPage() {
           </CardTitle>
           <CardDescription className="text-center">
             {verifying && 'Please wait while we verify your payment'}
-            {!verifying && verified && 'Your membership has been activated'}
+            {!verifying && verified && successDescription}
             {!verifying && !verified && 'There was an issue verifying your payment'}
           </CardDescription>
         </CardHeader>
@@ -143,10 +171,7 @@ export default function PaymentSuccessPage() {
 
           {verified && !verifying && (
             <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-800">
-                Your payment has been verified and your membership has been activated.
-                You can now participate in group activities.
-              </p>
+              <p className="text-sm text-green-800">{successBody}</p>
             </div>
           )}
 
@@ -157,10 +182,10 @@ export default function PaymentSuccessPage() {
                 className="w-full"
                 variant={verified ? 'default' : 'outline'}
               >
-                {verified ? 'Go to Group' : 'Return to Dashboard'}
+                {verified ? continueLabel : 'Return to Dashboard'}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
-              
+
               {!verified && canRetry && (
                 <Button
                   onClick={handleRetry}
