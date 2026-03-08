@@ -131,6 +131,7 @@ export interface Transaction {
   id: string;
   userId: string;
   groupId: string;
+  contributionId?: string; // SQL: contribution_id - references the contribution this transaction was made for
   type: 'contribution' | 'payout' | 'security_deposit' | 'penalty' | 'refund' | 'deposit' | 'withdrawal' | 'fee';
   amount: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled'; // Match database schema
