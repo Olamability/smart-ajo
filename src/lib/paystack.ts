@@ -167,6 +167,10 @@ class PaystackService {
           metadata: config.metadata || {},
           callback_url: config.callback_url,
           onSuccess: (response: PaystackResponse) => {
+            console.log('[PAYMENT TRACE] Paystack onSuccess callback fired', {
+              reference: response.reference,
+              status: response.status,
+            });
             paymentCompleted = true;
             if (config.onSuccess) {
               config.onSuccess(response);

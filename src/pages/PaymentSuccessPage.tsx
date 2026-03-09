@@ -73,6 +73,12 @@ export default function PaymentSuccessPage() {
         if (result.success && result.verified) {
           setVerified(true);
           setCanRetry(false);
+          console.log('[PAYMENT TRACE] React state update after verification', {
+            reference,
+            verified: true,
+            error: null,
+            paymentType,
+          });
           const successMsg = isContribution
             ? 'Payment verified! Your contribution has been recorded.'
             : 'Payment verified successfully! Membership activated.';
@@ -80,6 +86,12 @@ export default function PaymentSuccessPage() {
         } else {
           setError(result.error || 'Payment verification failed');
           setCanRetry(true);
+          console.log('[PAYMENT TRACE] React state update after verification', {
+            reference,
+            verified: false,
+            error: result.error || 'Payment verification failed',
+            paymentType,
+          });
 
           // Auto-retry once after 2 seconds for transient errors
           if (
