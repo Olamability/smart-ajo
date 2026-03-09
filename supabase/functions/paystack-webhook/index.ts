@@ -18,7 +18,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { createHmac } from 'https://deno.land/std@0.168.0/node/crypto.ts';
 
 const corsHeaders = {
@@ -47,7 +47,7 @@ interface PaystackWebhookEvent {
       paymentType?: string;
       slotNumber?: number;
       cycleId?: string;
-      [key: string]: any;
+      [key: string]: unknown;
     };
     customer: {
       id: number;
@@ -78,7 +78,7 @@ const KOBO_TO_NAIRA_DIVISOR = 100;
  * Process payment success event
  */
 async function processPaymentSuccess(
-  supabase: any,
+  supabase: SupabaseClient,
   eventData: PaystackWebhookEvent['data']
 ) {
   const { reference, amount, metadata, status } = eventData;

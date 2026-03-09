@@ -95,7 +95,7 @@ export default function GroupDetailPage() {
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   
   // State for join request status tracking
-  const [userJoinRequest, setUserJoinRequest] = useState<any>(null);
+  const [userJoinRequest, setUserJoinRequest] = useState<Record<string, unknown> | null>(null);
 
   // Initial load effect
   useEffect(() => {
@@ -264,7 +264,7 @@ export default function GroupDetailPage() {
         slotNumber: selectedSlot,
       });
     } else {
-      const preferredSlot = userJoinRequest?.preferred_slot || 1;
+      const preferredSlot = (userJoinRequest?.preferred_slot as number) || 1;
       await initiatePayment({
         type: 'group_join',
         groupId: id,

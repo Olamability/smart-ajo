@@ -1,22 +1,24 @@
 /**
  * Payment Success Page
  *
- * Handles payment verification after a successful Paystack payment.
+ * Landed on after a successful Paystack payment popup.
+ * Calls the verify-payment edge function which:
+ *   - Verifies the payment with Paystack API (server-side, secret key)
+ *   - Updates the transactions table to 'completed'
+ *   - For contributions: marks the contribution as paid and updates group balance
+ *   - For memberships: activates the group_members record
+ *
  * Supports two payment types via the `?type=` URL parameter:
  *   - (default) membership payments: group_creation / group_join
  *   - contribution payments: ?type=contribution
  *
- * Note: After Paystack redirect, session restoration may take a moment.
- * We wait for auth context to be ready before attempting verification.
+ * Note: The paystack-webhook edge function runs independently and also records
+ * the payment — so even if this page fails, the payment is still recorded.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  verifyPaymentAndActivateMembership,
-  verifyPaymentAndRecordContribution,
-} from '@/api/payments';
-import { useAuth } from '@/contexts/AuthContext';
+import { createClient } from '@/lib/client/supabase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle, Loader2, XCircle, ArrowRight, RefreshCw } from 'lucide-react';
@@ -24,112 +26,105 @@ import { toast } from 'sonner';
 
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
-  const { isAuthenticated, loading: authLoading } = useAuth();
   const [verifying, setVerifying] = useState(true);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [canRetry, setCanRetry] = useState(false);
+  const verificationAttempted = useRef(false);
 
   const reference = searchParams.get('reference');
   const groupId = searchParams.get('group');
-  const paymentType = searchParams.get('type'); // 'contribution' or absent for membership
-
+  const paymentType = searchParams.get('type'); // 'contribution' or null (membership)
   const isContribution = paymentType === 'contribution';
 
+  const runVerification = async () => {
+    if (!reference) {
+      setError('No payment reference found in URL');
+      setVerifying(false);
+      return;
+    }
+
+    setVerifying(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+
+      // Layer 1 check: poll the transactions table to see whether the payment was
+      // already recorded by the webhook or the inline verification in usePayment.
+      // Retry a few times with short delays — the webhook may still be in-flight when
+      // the user lands on this page, so give it a moment before falling back.
+      console.log('[PaymentSuccessPage] Polling DB for transaction status', { reference });
+      const DB_POLL_ATTEMPTS = 3;
+      const DB_POLL_DELAY_MS = 600;
+      let txnStatus: string | null = null;
+
+      for (let attempt = 0; attempt < DB_POLL_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise<void>((res) => setTimeout(res, DB_POLL_DELAY_MS));
+        }
+        const { data: txn } = await supabase
+          .from('transactions')
+          .select('status')
+          .eq('reference', reference)
+          .maybeSingle();
+        txnStatus = txn?.status ?? null;
+        if (txnStatus === 'completed') break;
+      }
+
+      if (txnStatus === 'completed') {
+        console.log('[PaymentSuccessPage] Payment already recorded (webhook/inline)', { reference });
+        setVerified(true);
+        const msg = isContribution
+          ? 'Payment verified! Your contribution has been recorded.'
+          : 'Payment verified! Your membership has been activated.';
+        toast.success(msg);
+        setVerifying(false);
+        return;
+      }
+
+      // Layer 2 fallback: DB still not updated — call verify-payment edge function directly.
+      // This covers slow webhooks or cases where the inline verification didn't complete.
+      console.log('[PaymentSuccessPage] Calling verify-payment edge function', {
+        reference,
+        currentStatus: txnStatus ?? 'not found',
+      });
+      const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+        body: { reference },
+      });
+
+      if (fnError) {
+        throw new Error(fnError.message ?? 'Verification request failed');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error ?? 'Payment verification failed');
+      }
+
+      console.log('[PaymentSuccessPage] Verification successful', data);
+      setVerified(true);
+      const msg = isContribution
+        ? 'Payment verified! Your contribution has been recorded.'
+        : 'Payment verified! Your membership has been activated.';
+      toast.success(msg);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'An unexpected error occurred';
+      console.error('[PaymentSuccessPage] Verification error:', err);
+      setError(message);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // Run verification once on mount.
   useEffect(() => {
-    const verifyPayment = async () => {
-      if (!reference) {
-        setError('No payment reference provided');
-        setVerifying(false);
-        setCanRetry(false);
-        return;
-      }
-
-      // Wait for auth context to be ready after redirect.
-      // This ensures session is fully restored before attempting verification.
-      if (authLoading) {
-        console.log('PaymentSuccessPage: Waiting for auth context to be ready...');
-        return;
-      }
-
-      if (!isAuthenticated) {
-        setError('Please log in to verify your payment');
-        setVerifying(false);
-        setCanRetry(true);
-        return;
-      }
-
-      try {
-        console.log('PaymentSuccessPage: Verifying payment with reference:', reference, 'type:', paymentType);
-        setVerifying(true);
-        setError(null);
-
-        // Route to the correct verification function based on payment type
-        const result = isContribution
-          ? await verifyPaymentAndRecordContribution(reference)
-          : await verifyPaymentAndActivateMembership(reference);
-
-        if (result.success && result.verified) {
-          setVerified(true);
-          setCanRetry(false);
-          console.log('[PAYMENT TRACE] React state update after verification', {
-            reference,
-            verified: true,
-            error: null,
-            paymentType,
-          });
-          const successMsg = isContribution
-            ? 'Payment verified! Your contribution has been recorded.'
-            : 'Payment verified successfully! Membership activated.';
-          toast.success(successMsg);
-        } else {
-          setError(result.error || 'Payment verification failed');
-          setCanRetry(true);
-          console.log('[PAYMENT TRACE] React state update after verification', {
-            reference,
-            verified: false,
-            error: result.error || 'Payment verification failed',
-            paymentType,
-          });
-
-          // Auto-retry once after 2 seconds for transient errors
-          if (
-            retryCount < 1 &&
-            (result.error?.includes('Session not available') ||
-              result.error?.includes('network') ||
-              result.error?.includes('timeout'))
-          ) {
-            console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
-            setTimeout(() => {
-              setRetryCount((prev) => prev + 1);
-            }, 2000);
-          }
-        }
-      } catch (err) {
-        console.error('PaymentSuccessPage: Verification error:', err);
-        const errorMessage = err instanceof Error ? err.message : 'An error occurred';
-        setError(errorMessage);
-        setCanRetry(true);
-
-        // Auto-retry once after 2 seconds for network errors
-        if (retryCount < 1) {
-          console.log('PaymentSuccessPage: Auto-retrying verification in 2 seconds...');
-          setTimeout(() => {
-            setRetryCount((prev) => prev + 1);
-          }, 2000);
-        }
-      } finally {
-        setVerifying(false);
-      }
-    };
-
-    verifyPayment();
-  }, [reference, authLoading, isAuthenticated, retryCount, isContribution, paymentType]);
+    if (verificationAttempted.current) return;
+    verificationAttempted.current = true;
+    runVerification();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleContinue = () => {
     if (groupId) {
-      // Full page reload so the group page fetches fresh data
       window.location.href = `/groups/${groupId}`;
     } else {
       window.location.href = '/dashboard';
@@ -137,8 +132,15 @@ export default function PaymentSuccessPage() {
   };
 
   const handleRetry = () => {
-    setRetryCount((prev) => prev + 1);
+    verificationAttempted.current = false;
+    runVerification();
   };
+
+  const continueLabel = groupId
+    ? isContribution
+      ? 'Back to Group'
+      : 'Go to Group'
+    : 'Go to Dashboard';
 
   const successDescription = isContribution
     ? 'Your contribution has been recorded'
@@ -147,12 +149,6 @@ export default function PaymentSuccessPage() {
   const successBody = isContribution
     ? 'Your contribution payment has been verified and recorded. Thank you for keeping up with your savings!'
     : 'Your payment has been verified and your membership has been activated. You can now participate in group activities.';
-
-  const continueLabel = groupId
-    ? isContribution
-      ? 'Back to Group'
-      : 'Go to Group'
-    : 'Go to Dashboard';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -164,24 +160,28 @@ export default function PaymentSuccessPage() {
             {!verifying && !verified && <XCircle className="h-16 w-16 text-red-500" />}
           </div>
           <CardTitle className="text-center">
-            {verifying && 'Verifying Payment...'}
+            {verifying && 'Verifying Payment…'}
             {!verifying && verified && 'Payment Successful!'}
             {!verifying && !verified && 'Payment Verification Failed'}
           </CardTitle>
           <CardDescription className="text-center">
-            {verifying && 'Please wait while we verify your payment'}
+            {verifying && 'Please wait while we confirm your payment'}
             {!verifying && verified && successDescription}
-            {!verifying && !verified && 'There was an issue verifying your payment'}
+            {!verifying && !verified && 'There was an issue confirming your payment'}
           </CardDescription>
         </CardHeader>
+
         <CardContent>
-          {error && !verifying && (
+          {!verifying && error && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-sm text-red-800">{error}</p>
+              {reference && (
+                <p className="text-xs text-red-600 mt-1">Reference: {reference}</p>
+              )}
             </div>
           )}
 
-          {verified && !verifying && (
+          {!verifying && verified && (
             <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
               <p className="text-sm text-green-800">{successBody}</p>
             </div>
@@ -198,7 +198,7 @@ export default function PaymentSuccessPage() {
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
 
-              {!verified && canRetry && (
+              {!verified && (
                 <Button
                   onClick={handleRetry}
                   className="w-full mt-2"
@@ -214,8 +214,8 @@ export default function PaymentSuccessPage() {
 
           {verifying && (
             <div className="text-center text-sm text-muted-foreground">
-              <p>This may take a few moments...</p>
-              <p className="mt-2">Reference: {reference}</p>
+              <p>This may take a few moments…</p>
+              {reference && <p className="mt-2">Reference: {reference}</p>}
             </div>
           )}
         </CardContent>

@@ -19,7 +19,7 @@ interface ExtendedTransaction {
   payment_method: string;
   created_at: string;
   group_id?: string;
-  metadata?: any;
+  metadata?: Record<string, unknown>;
 }
 
 export default function TransactionsPage() {

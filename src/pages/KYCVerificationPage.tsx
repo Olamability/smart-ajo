@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { createClient } from '../lib/client/supabase';
 import { Button } from '../components/ui/button';
@@ -10,11 +9,9 @@ import { toast } from 'sonner';
 import { Shield, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
 
 export default function KYCVerificationPage() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const supabase = createClient();
 
-  const [loading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [formData, setFormData] = useState({
     bvn: '',
@@ -100,12 +97,13 @@ export default function KYCVerificationPage() {
       } else {
         toast.error(result.message || 'Verification failed. Please check your details and try again.');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const err = error as { message?: string };
       console.error('KYC verification error:', error);
-      toast.error(error.message || 'Failed to verify identity. Please try again.');
+      toast.error(err.message || 'Failed to verify identity. Please try again.');
       setVerificationResult({
         verified: false,
-        message: error.message || 'Verification failed',
+        message: err.message || 'Verification failed',
       });
     } finally {
       setVerifying(false);

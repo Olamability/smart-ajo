@@ -21,7 +21,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Bell, Check, Loader2, Trash2, CheckCheck } from 'lucide-react';
+import { Bell, Loader2, CheckCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -109,7 +109,7 @@ export default function NotificationCenter() {
     }
   };
 
-  const getNotificationIcon = (type: string) => {
+  const getNotificationIcon = (_type: string) => {
     return <Bell className="w-4 h-4" />;
   };
 

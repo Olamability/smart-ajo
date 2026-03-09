@@ -1,10 +1,15 @@
 /**
  * usePayment Hook
  *
- * Reusable hook that encapsulates the full Paystack payment flow:
- * 1. Initialize a pending payment record in the database
- * 2. Open the Paystack inline checkout popup
- * 3. On success, redirect to PaymentSuccessPage for backend verification
+ * Orchestrates the full Paystack payment flow:
+ * 1. Call the initialize-payment edge function to create a pending transaction
+ * 2. Open the Paystack inline popup
+ * 3. On success, redirect to PaymentSuccessPage — the backend does the verification
+ *
+ * The UI is NEVER the source of truth for payment success.
+ * Verification happens in the verify-payment edge function called by PaymentSuccessPage.
+ * The paystack-webhook edge function provides a fallback that records payment even
+ * if the user closes their browser before reaching the success page.
  *
  * Usage:
  *   const { initiatePayment, isProcessing } = usePayment();
@@ -13,15 +18,9 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  initializeGroupCreationPayment,
-  initializeGroupJoinPayment,
-  initializeAjoContributionPayment,
-  verifyContributionPayment,
-  verifyPaymentAndActivateMembership,
-} from '@/api/payments';
-import { paystackService } from '@/lib/paystack';
-import type { PaymentMetadata } from '@/lib/paystack';
+import { paystackService } from '@/lib/paystackService';
+import type { PaymentMetadata } from '@/lib/paystackService';
+import { createClient } from '@/lib/client/supabase';
 import { toast } from 'sonner';
 
 export type PaymentType = 'group_creation' | 'group_join' | 'contribution';
@@ -68,38 +67,47 @@ export function usePayment(): UsePaymentReturn {
     setIsProcessing(true);
 
     try {
-      // Step 1: Create a pending transaction record in the database
-      let initResult;
-      if (params.type === 'group_creation') {
-        initResult = await initializeGroupCreationPayment(
-          params.groupId,
-          params.amount,
-          params.slotNumber
-        );
-      } else if (params.type === 'group_join') {
-        initResult = await initializeGroupJoinPayment(
-          params.groupId,
-          params.amount,
-          params.slotNumber
-        );
-      } else {
-        initResult = await initializeAjoContributionPayment({
-          email: user.email,
-          amountInKobo: paystackService.toKobo(params.amount),
-          ajoGroupId: params.groupId,
-          contributionId: params.contributionId,
-        });
-      }
+      const supabase = createClient();
 
-      if (!initResult.success || !initResult.reference) {
-        toast.error(initResult.error || 'Failed to initialize payment');
+      // Step 1: Create a pending transaction via the initialize-payment edge function.
+      // The edge function is the authoritative source for the reference and amount.
+      const initBody =
+        params.type === 'contribution'
+          ? {
+              groupId: params.groupId,
+              amount: paystackService.toKobo(params.amount),
+              paymentType: params.type,
+              contributionId: params.contributionId,
+              cycleNumber: params.cycleNumber,
+            }
+          : {
+              groupId: params.groupId,
+              amount: paystackService.toKobo(params.amount),
+              paymentType: params.type,
+              slotNumber: params.slotNumber,
+            };
+
+      console.log('[usePayment] Calling initialize-payment edge function', initBody);
+      const { data: initData, error: initError } = await supabase.functions.invoke(
+        'initialize-payment',
+        { body: initBody }
+      );
+
+      if (initError || !initData?.reference) {
+        const message = initData?.error ?? initError?.message ?? 'Failed to initialize payment';
+        console.error('[usePayment] initialize-payment failed:', message);
+        toast.error(message);
         setIsProcessing(false);
         return;
       }
 
-      const { reference } = initResult;
+      const { reference } = initData as { reference: string };
+      console.log('[usePayment] Pending transaction created', { reference });
 
-      // Step 2: Build metadata for Paystack and the backend edge function
+      // Step 2: Build the type query param used in the success URL.
+      const typeParam = params.type === 'contribution' ? '&type=contribution' : '';
+
+      // Step 3: Build metadata to pass to Paystack (the webhook also reads this).
       const metadata: PaymentMetadata =
         params.type === 'contribution'
           ? {
@@ -116,100 +124,59 @@ export function usePayment(): UsePaymentReturn {
               slotNumber: params.slotNumber,
             };
 
-      // Build success redirect URL (includes type so PaymentSuccessPage shows the right message)
-      const typeParam = params.type === 'contribution' ? '&type=contribution' : '';
-      const successUrl = `/payment/success?reference=${reference}&group=${params.groupId}${typeParam}`;
-      const shouldRedirectAfterVerification = import.meta.env.VITE_ENABLE_PAYMENT_SUCCESS_REDIRECT !== 'false';
-
-      // Step 3: Open the Paystack inline checkout popup
-      await paystackService.initializePayment({
+      // Step 4: Open the Paystack popup.
+      // On success:
+      //   a) Fire an inline verify-payment call in the background (non-blocking).
+      //      This ensures the DB is updated even if the success page redirect fails or
+      //      the user closes the browser tab immediately after payment.
+      //   b) Redirect to PaymentSuccessPage regardless — it shows the confirmed result.
+      // The webhook independently records the payment server-side (primary layer).
+      await paystackService.openPopup({
         email: user.email,
         amount: paystackService.toKobo(params.amount),
         reference,
         metadata,
-        callback_url: `${import.meta.env.VITE_APP_URL}${successUrl}`,
-        onSuccess: async (response) => {
-          const resolvedReference = response?.reference || reference;
-          const resolvedSuccessUrl = `/payment/success?reference=${resolvedReference}&group=${params.groupId}${typeParam}`;
-          let shouldRedirect = false;
-          console.log('usePayment: Paystack onSuccess callback fired', {
-            expectedReference: reference,
-            paystackReference: response?.reference,
-            resolvedReference,
-            paymentType: params.type,
-          });
+        onSuccess: (response) => {
+          const resolvedRef = response.reference ?? reference;
+          const resolvedPath = `/payment/success?reference=${resolvedRef}&group=${params.groupId}${typeParam}`;
 
-          try {
-            toast.success('Payment completed! Verifying...', { duration: 2000 });
-            console.log('usePayment: Invoking Supabase verification edge function', {
-              paymentType: params.type,
-              reference: resolvedReference,
+          console.log('[usePayment] Payment successful', { reference: resolvedRef });
+          toast.success('Payment completed! Verifying…');
+
+          // Layer 2: inline verification — fire-and-forget, do not block the redirect.
+          // Even if this fails, the webhook (layer 1) and success page (layer 3) act as fallback.
+          // Reuse the supabase client from the outer scope — it already has the user's session.
+          supabase.functions
+            .invoke('verify-payment', { body: { reference: resolvedRef } })
+            .then(({ data, error: fnErr }) => {
+              if (fnErr || !data?.success) {
+                console.warn(
+                  '[usePayment] Inline verification attempt failed — webhook and success page will handle it',
+                  fnErr?.message ?? data?.error
+                );
+              } else {
+                console.log('[usePayment] Inline verification succeeded', { reference: resolvedRef });
+              }
+            })
+            .catch((err: unknown) => {
+              console.warn('[usePayment] Inline verification error (non-critical):', err);
             });
 
-            const verificationResult =
-              params.type === 'contribution'
-                ? await verifyContributionPayment(resolvedReference)
-                : await verifyPaymentAndActivateMembership(resolvedReference);
-
-            console.log('usePayment: Verification result', {
-              reference: resolvedReference,
-              paymentType: params.type,
-              success: verificationResult.success,
-              verified: verificationResult.verified,
-              error: verificationResult.error,
-              data: verificationResult.data,
-            });
-
-            if (verificationResult.success && verificationResult.verified) {
-              console.log('usePayment: Verification succeeded and database updated', {
-                reference: resolvedReference,
-                paymentType: params.type,
-                data: verificationResult.data,
-              });
-              const successMessage =
-                params.type === 'contribution'
-                  ? 'Payment verified! Your contribution has been recorded.'
-                  : 'Payment verified successfully! Membership activated.';
-              toast.success(successMessage);
-              shouldRedirect = shouldRedirectAfterVerification;
-            } else {
-              throw new Error(verificationResult.error || 'Payment verification failed');
-            }
-          } catch (verifyError) {
-            console.error('usePayment: Error verifying payment after Paystack success:', verifyError);
-            const errorMessage = verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
-            const userMessage = `Payment completed but verification could not be confirmed. ${errorMessage} Please retry verification in a moment or contact support with reference ${resolvedReference}.`;
-            toast.error(userMessage);
-          } finally {
-            setIsProcessing(false);
-            if (shouldRedirect) {
-              console.log('usePayment: Redirecting to success page after verification', {
-                reference: resolvedReference,
-                successUrl: resolvedSuccessUrl,
-              });
-              window.location.href = resolvedSuccessUrl;
-            }
-          }
+          // Layer 3: always redirect to success page for user-facing confirmation.
+          window.location.href = resolvedPath;
         },
         onClose: () => {
-          // onClose is only called when the user closes the popup without paying
-          // (paystack.ts suppresses this callback after a successful payment).
-          console.log('usePayment: Payment popup closed without completing payment');
+          console.log('[usePayment] Payment popup closed by user');
           toast.info('Payment cancelled');
           setIsProcessing(false);
         },
       });
+
+      // Note: if openPopup resolves without onSuccess being called (popup closed),
+      // setIsProcessing(false) was already called in onClose.
     } catch (error) {
-      // 'Payment window closed' and 'Payment cancelled by user' are normal user
-      // interactions, not errors — the onClose callback already handles UI feedback.
-      const isUserClose =
-        error instanceof Error &&
-        (error.message === 'Payment window closed' ||
-          error.message === 'Payment cancelled by user');
-      if (!isUserClose) {
-        console.error('Payment error:', error);
-        toast.error('Failed to initialize payment');
-      }
+      console.error('[usePayment] Unexpected payment error:', error);
+      toast.error('Failed to initialize payment. Please try again.');
       setIsProcessing(false);
     }
   };

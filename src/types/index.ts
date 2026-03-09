@@ -271,13 +271,13 @@ export interface AuditLog {
   action: string;
   resource_type: string;
   resource_id: string | null;
-  details: Record<string, any>;
+  details: Record<string, unknown>;
   ip_address: string | null;
   created_at: string;
 }
 
 export interface UserDetails extends AdminUser {
-  kyc_data: Record<string, any>;
+  kyc_data: Record<string, unknown>;
   avatar_url: string | null;
   date_of_birth: string | null;
   address: string | null;
