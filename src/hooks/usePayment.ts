@@ -119,6 +119,7 @@ export function usePayment(): UsePaymentReturn {
       // Build success redirect URL (includes type so PaymentSuccessPage shows the right message)
       const typeParam = params.type === 'contribution' ? '&type=contribution' : '';
       const successUrl = `/payment/success?reference=${reference}&group=${params.groupId}${typeParam}`;
+      const shouldRedirectAfterVerification = import.meta.env.VITE_ENABLE_PAYMENT_SUCCESS_REDIRECT !== 'false';
 
       // Step 3: Open the Paystack inline checkout popup
       await paystackService.initializePayment({
@@ -160,20 +161,24 @@ export function usePayment(): UsePaymentReturn {
                   ? 'Payment verified! Your contribution has been recorded.'
                   : 'Payment verified successfully! Membership activated.';
               toast.success(successMessage);
-              setIsProcessing(false);
 
-              // Optional: navigate to success page after verification (not before)
-              if (successUrl) {
+              if (shouldRedirectAfterVerification) {
+                console.log('usePayment: Redirecting to success page after verification', {
+                  reference,
+                  successUrl,
+                });
                 window.location.href = successUrl;
+              } else {
+                setIsProcessing(false);
               }
             } else {
               throw new Error(verificationResult.error || 'Payment verification failed');
             }
           } catch (verifyError) {
             console.error('usePayment: Error verifying payment after Paystack success:', verifyError);
-            const errorMessage =
-              verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
-            toast.error(errorMessage);
+            const errorMessage = verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
+            const userMessage = `Payment completed but verification could not be confirmed. ${errorMessage} Please retry verification in a moment or contact support with reference ${reference}.`;
+            toast.error(userMessage);
             setIsProcessing(false);
           }
         },
