@@ -129,9 +129,11 @@ export function usePayment(): UsePaymentReturn {
         metadata,
         callback_url: `${import.meta.env.VITE_APP_URL}${successUrl}`,
         onSuccess: async (response) => {
+          const resolvedReference = response?.reference || reference;
           console.log('usePayment: Paystack onSuccess callback fired', {
             expectedReference: reference,
             paystackReference: response?.reference,
+            resolvedReference,
             paymentType: params.type,
           });
 
@@ -139,23 +141,29 @@ export function usePayment(): UsePaymentReturn {
             toast.success('Payment completed! Verifying...', { duration: 2000 });
             console.log('usePayment: Invoking Supabase verification edge function', {
               paymentType: params.type,
-              reference,
+              reference: resolvedReference,
             });
 
             const verificationResult =
               params.type === 'contribution'
-                ? await verifyContributionPayment(reference)
-                : await verifyPaymentAndActivateMembership(reference);
+                ? await verifyContributionPayment(resolvedReference)
+                : await verifyPaymentAndActivateMembership(resolvedReference);
 
             console.log('usePayment: Verification result', {
-              reference,
+              reference: resolvedReference,
               paymentType: params.type,
               success: verificationResult.success,
               verified: verificationResult.verified,
               error: verificationResult.error,
+              data: verificationResult.data,
             });
 
             if (verificationResult.success && verificationResult.verified) {
+              console.log('usePayment: Verification succeeded and database updated', {
+                reference: resolvedReference,
+                paymentType: params.type,
+                data: verificationResult.data,
+              });
               const successMessage =
                 params.type === 'contribution'
                   ? 'Payment verified! Your contribution has been recorded.'
@@ -164,12 +172,11 @@ export function usePayment(): UsePaymentReturn {
 
               if (shouldRedirectAfterVerification) {
                 console.log('usePayment: Redirecting to success page after verification', {
-                  reference,
+                  reference: resolvedReference,
                   successUrl,
                 });
-                window.location.href = successUrl;
-              } else {
                 setIsProcessing(false);
+                window.location.href = successUrl;
               }
             } else {
               throw new Error(verificationResult.error || 'Payment verification failed');
@@ -177,9 +184,13 @@ export function usePayment(): UsePaymentReturn {
           } catch (verifyError) {
             console.error('usePayment: Error verifying payment after Paystack success:', verifyError);
             const errorMessage = verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
-            const userMessage = `Payment completed but verification could not be confirmed. ${errorMessage} Please retry verification in a moment or contact support with reference ${reference}.`;
+            const userMessage = `Payment completed but verification could not be confirmed. ${errorMessage} Please retry verification in a moment or contact support with reference ${resolvedReference}.`;
             toast.error(userMessage);
             setIsProcessing(false);
+          } finally {
+            if (!shouldRedirectAfterVerification) {
+              setIsProcessing(false);
+            }
           }
         },
         onClose: () => {
