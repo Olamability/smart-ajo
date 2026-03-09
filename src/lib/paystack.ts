@@ -154,6 +154,10 @@ class PaystackService {
 
     return new Promise((resolve, reject) => {
       try {
+        // Track whether payment completed successfully so onClose can distinguish
+        // a user-initiated close from the automatic close that follows onSuccess.
+        let paymentCompleted = false;
+
         const handler = window.PaystackPop.setup({
           key: publicKey,
           email: config.email,
@@ -163,6 +167,7 @@ class PaystackService {
           metadata: config.metadata || {},
           callback_url: config.callback_url,
           onSuccess: (response: PaystackResponse) => {
+            paymentCompleted = true;
             if (config.onSuccess) {
               config.onSuccess(response);
             }
@@ -175,12 +180,15 @@ class PaystackService {
             reject(new Error('Payment cancelled by user'));
           },
           onClose: () => {
-            if (config.onClose) {
-              config.onClose();
+            // After a successful payment Paystack automatically closes the popup,
+            // which also triggers onClose.  We must NOT treat that as a cancellation.
+            if (!paymentCompleted) {
+              if (config.onClose) {
+                config.onClose();
+              }
+              // Reject the promise so callers are not left with a hanging await.
+              reject(new Error('Payment window closed'));
             }
-            // NOTE: According to Paystack documentation, onClose is called when user manually closes
-            // the payment modal without completing payment. In most cases, it's mutually exclusive
-            // with onSuccess, but behavior may vary depending on integration type and popup state.
           },
         });
 

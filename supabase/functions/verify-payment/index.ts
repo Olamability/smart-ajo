@@ -91,7 +91,7 @@ serve(async (req) => {
 
     // Verify payment with Paystack
     const paystackResponse = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
       {
         method: 'GET',
         headers: {

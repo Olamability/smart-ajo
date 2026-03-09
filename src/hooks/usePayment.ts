@@ -126,18 +126,30 @@ export function usePayment(): UsePaymentReturn {
         metadata,
         callback_url: `${import.meta.env.VITE_APP_URL}${successUrl}`,
         onSuccess: () => {
+          console.log('usePayment: Payment successful, redirecting to verification page. Reference:', reference);
           toast.success('Payment completed! Verifying...', { duration: 2000 });
           // Use a full-page redirect so the session is cleanly restored before verification
           window.location.href = successUrl;
         },
         onClose: () => {
+          // onClose is only called when the user closes the popup without paying
+          // (paystack.ts suppresses this callback after a successful payment).
+          console.log('usePayment: Payment popup closed without completing payment');
           toast.info('Payment cancelled');
           setIsProcessing(false);
         },
       });
     } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to initialize payment');
+      // 'Payment window closed' and 'Payment cancelled by user' are normal user
+      // interactions, not errors — the onClose callback already handles UI feedback.
+      const isUserClose =
+        error instanceof Error &&
+        (error.message === 'Payment window closed' ||
+          error.message === 'Payment cancelled by user');
+      if (!isUserClose) {
+        console.error('Payment error:', error);
+        toast.error('Failed to initialize payment');
+      }
       setIsProcessing(false);
     }
   };
