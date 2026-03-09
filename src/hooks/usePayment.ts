@@ -130,6 +130,8 @@ export function usePayment(): UsePaymentReturn {
         callback_url: `${import.meta.env.VITE_APP_URL}${successUrl}`,
         onSuccess: async (response) => {
           const resolvedReference = response?.reference || reference;
+          const resolvedSuccessUrl = `/payment/success?reference=${resolvedReference}&group=${params.groupId}${typeParam}`;
+          let shouldNavigateToSuccess = false;
           console.log('usePayment: Paystack onSuccess callback fired', {
             expectedReference: reference,
             paystackReference: response?.reference,
@@ -169,15 +171,7 @@ export function usePayment(): UsePaymentReturn {
                   ? 'Payment verified! Your contribution has been recorded.'
                   : 'Payment verified successfully! Membership activated.';
               toast.success(successMessage);
-
-              if (shouldRedirectAfterVerification) {
-                console.log('usePayment: Redirecting to success page after verification', {
-                  reference: resolvedReference,
-                  successUrl,
-                });
-                setIsProcessing(false);
-                window.location.href = successUrl;
-              }
+              shouldNavigateToSuccess = shouldRedirectAfterVerification;
             } else {
               throw new Error(verificationResult.error || 'Payment verification failed');
             }
@@ -186,10 +180,14 @@ export function usePayment(): UsePaymentReturn {
             const errorMessage = verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
             const userMessage = `Payment completed but verification could not be confirmed. ${errorMessage} Please retry verification in a moment or contact support with reference ${resolvedReference}.`;
             toast.error(userMessage);
-            setIsProcessing(false);
           } finally {
-            if (!shouldRedirectAfterVerification) {
-              setIsProcessing(false);
+            setIsProcessing(false);
+            if (shouldNavigateToSuccess) {
+              console.log('usePayment: Redirecting to success page after verification', {
+                reference: resolvedReference,
+                successUrl: resolvedSuccessUrl,
+              });
+              window.location.href = resolvedSuccessUrl;
             }
           }
         },
