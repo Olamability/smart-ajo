@@ -320,12 +320,13 @@ export const verifyPaymentAndActivateMembership = async (
 
     if (error) {
       console.error('verifyPaymentAndActivateMembership: Error verifying payment:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Payment verification failed' };
     }
 
-    if (!data.success) {
-      console.error('verifyPaymentAndActivateMembership: Payment verification failed:', data.error);
-      return { success: false, error: data.error || 'Payment verification failed' };
+    if (!data || !data.success) {
+      const errorMsg = data?.error || 'Payment verification failed';
+      console.error('verifyPaymentAndActivateMembership: Payment verification failed:', errorMsg);
+      return { success: false, error: errorMsg };
     }
 
     console.log('verifyPaymentAndActivateMembership: Payment verified successfully');
@@ -361,20 +362,21 @@ export const verifyPaymentAndRecordContribution = async (
       return { success: false, error: 'Not authenticated' };
     }
 
-    console.log('verifyPaymentAndRecordContribution: Calling verify-payment function');
-    // Call Supabase Edge Function to verify payment
-    const { data, error } = await supabase.functions.invoke('verify-payment', {
+    console.log('verifyPaymentAndRecordContribution: Calling verify-contribution function');
+    // Call the dedicated verify-contribution Edge Function which also updates group balance
+    const { data, error } = await supabase.functions.invoke('verify-contribution', {
       body: { reference },
     });
 
     if (error) {
       console.error('verifyPaymentAndRecordContribution: Error verifying payment:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Payment verification failed' };
     }
 
-    if (!data.success) {
-      console.error('verifyPaymentAndRecordContribution: Payment verification failed:', data.error);
-      return { success: false, error: data.error || 'Payment verification failed' };
+    if (!data || !data.success) {
+      const errorMsg = data?.error || 'Payment verification failed';
+      console.error('verifyPaymentAndRecordContribution: Payment verification failed:', errorMsg);
+      return { success: false, error: errorMsg };
     }
 
     console.log('verifyPaymentAndRecordContribution: Payment verified successfully');
@@ -425,12 +427,13 @@ export const verifyContributionPayment = async (
 
     if (error) {
       console.error('verifyContributionPayment: Error verifying contribution payment:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Contribution payment verification failed' };
     }
 
-    if (!data.success) {
-      console.error('verifyContributionPayment: Contribution payment verification failed:', data.error);
-      return { success: false, error: data.error || 'Contribution payment verification failed' };
+    if (!data || !data.success) {
+      const errorMsg = data?.error || 'Contribution payment verification failed';
+      console.error('verifyContributionPayment: Contribution payment verification failed:', errorMsg);
+      return { success: false, error: errorMsg };
     }
 
     console.log('verifyContributionPayment: Contribution payment verified successfully');
