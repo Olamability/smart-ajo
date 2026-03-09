@@ -162,6 +162,18 @@ serve(async (req) => {
 
     console.log(`Processing payment - Type: ${paymentType}, User: ${userId}, Group: ${groupId}`);
 
+    // Contribution payments must use the verify-contribution endpoint
+    if (paymentType === 'contribution') {
+      console.error('verify-payment called with contribution paymentType — use verify-contribution instead');
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Contribution payments must be verified via the verify-contribution endpoint',
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     if (!userId || !groupId) {
       console.error('Invalid payment metadata - missing userId or groupId');
       return new Response(
@@ -275,92 +287,6 @@ serve(async (req) => {
           console.error('Error updating join request:', JSON.stringify(requestUpdateError));
         } else {
           console.log('Join request updated successfully');
-        }
-      }
-    } else if (paymentType === 'contribution') {
-      console.log('Processing contribution payment');
-      
-      // Update existing contribution record to mark as paid
-      const contributionId = metadata.contributionId;
-      
-      if (!contributionId) {
-        console.error('Contribution ID missing in metadata');
-        return new Response(
-          JSON.stringify({ success: false, error: 'Contribution ID required for contribution payment' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      console.log(`Updating contribution ${contributionId} to paid`);
-      
-      // Update the contribution record to mark it as paid
-      const { error: contributionError } = await supabase
-        .from('contributions')
-        .update({
-          status: 'paid',
-          paid_date: new Date().toISOString(),
-          transaction_ref: reference,
-        })
-        .eq('id', contributionId);
-
-      if (contributionError) {
-        console.error('Error updating contribution:', JSON.stringify(contributionError));
-        return new Response(
-          JSON.stringify({ success: false, error: 'Failed to record contribution' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      console.log('Contribution updated successfully');
-
-      // Update group balance (total_collected)
-      const contributionAmountNaira = paymentData.amount / 100;
-      console.log(`Incrementing group ${groupId} total_collected by ${contributionAmountNaira}`);
-      const { error: balanceError } = await supabase.rpc('increment_group_total_collected', {
-        p_group_id: groupId,
-        p_amount: contributionAmountNaira,
-      });
-      if (balanceError) {
-        console.error('Error updating group balance:', JSON.stringify(balanceError));
-        // Non-critical — do not fail the verification
-      }
-
-      // Check if all members have contributed for this cycle
-      // First get the contribution to find group and cycle info
-      const { data: contributionData } = await supabase
-        .from('contributions')
-        .select('group_id, cycle_number')
-        .eq('id', contributionId)
-        .single();
-
-      if (contributionData) {
-        // Count total paid contributions for this cycle
-        const { data: contributionsData } = await supabase
-          .from('contributions')
-          .select('id')
-          .eq('group_id', contributionData.group_id)
-          .eq('cycle_number', contributionData.cycle_number)
-          .eq('status', 'paid');
-
-        // Get total members in the group
-        const { data: groupData } = await supabase
-          .from('groups')
-          .select('total_members')
-          .eq('id', contributionData.group_id)
-          .single();
-
-        const totalContributions = contributionsData?.length || 0;
-        const requiredContributions = groupData?.total_members || 0;
-
-        // If all members have paid for this cycle, trigger payout processing
-        // (Future implementation: Create payout record, initiate transfer, etc.)
-        if (totalContributions >= requiredContributions) {
-          console.log(`Cycle ${contributionData.cycle_number} complete for group ${contributionData.group_id} - ${totalContributions}/${requiredContributions} paid`);
-          // TODO: Implement payout logic here
-          // 1. Calculate payout amount
-          // 2. Identify recipient (based on rotation_position)
-          // 3. Create payout record
-          // 4. Initiate transfer via Paystack Transfer API
         }
       }
     }
