@@ -13,7 +13,7 @@ import { convertKycStatus } from '@/lib/constants/database';
 import { reportError } from '@/lib/utils/errorTracking';
 import { retryWithBackoff } from '@/lib/utils';
 import { parseAtomicRPCResponse, isTransientError, calculateBackoffDelay } from '@/lib/utils/auth';
-import { EmailConfirmationRequiredError } from '@/lib/utils/authErrors';
+import { EmailConfirmationRequiredError, isRateLimitError } from '@/lib/utils/authErrors';
 
 // Delay to allow database triggers and RLS policies to propagate after profile creation
 // Increased from 500ms to 1000ms to ensure better RLS policy propagation
@@ -455,6 +455,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (error || !data.user) {
         console.error('Signup auth error:', error?.message);
+        if (error && isRateLimitError(error)) {
+          // Surface rate-limit errors immediately – never retry them
+          throw error;
+        }
         if (error?.message?.includes('User already registered')) throw new Error('This email is already registered. Please sign in instead.');
         throw error || new Error('Signup failed: No user data returned');
       }
