@@ -95,6 +95,7 @@ serve(async (req) => {
     }
 
     console.log(`Verifying contribution payment with reference: ${reference}`);
+    console.log('[PAYMENT TRACE][verify-contribution] Edge function invoked', { reference });
 
     // Step 2: Call Paystack verification API
     const paystackResponse = await fetch(
@@ -192,6 +193,11 @@ serve(async (req) => {
 
     // Step 3a: Save transaction — update transaction record to 'completed'
     console.log('Updating transaction record to completed');
+    console.log('[PAYMENT TRACE][verify-contribution] Updating transaction record', {
+      reference,
+      contributionId,
+      userId,
+    });
     const { error: transactionUpdateError } = await supabase
       .from('transactions')
       .update({
@@ -216,9 +222,15 @@ serve(async (req) => {
     }
 
     console.log('Transaction record updated successfully');
+    console.log('[PAYMENT TRACE][verify-contribution] Transaction update succeeded', { reference });
 
     // Step 3b: Mark contribution as paid
     console.log(`Updating contribution ${contributionId} to paid`);
+    console.log('[PAYMENT TRACE][verify-contribution] Updating contribution record', {
+      contributionId,
+      reference,
+      userId,
+    });
     const { error: contributionError } = await supabase
       .from('contributions')
       .update({
@@ -238,6 +250,10 @@ serve(async (req) => {
     }
 
     console.log('Contribution marked as paid successfully');
+    console.log('[PAYMENT TRACE][verify-contribution] Contribution update succeeded', {
+      contributionId,
+      reference,
+    });
 
     // Step 3c: Update group balance (total_collected)
     // Increment the group's total_collected by the contribution amount (converted from kobo to naira)
@@ -258,6 +274,10 @@ serve(async (req) => {
     }
 
     console.log('Group total_collected incremented via RPC');
+    console.log('[PAYMENT TRACE][verify-contribution] Group balance increment succeeded', {
+      groupId,
+      amount: contributionAmountNaira,
+    });
 
     // Return success response
     console.log('Contribution payment verification completed successfully');

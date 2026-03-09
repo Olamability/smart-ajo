@@ -363,9 +363,16 @@ export const verifyPaymentAndRecordContribution = async (
     }
 
     console.log('verifyPaymentAndRecordContribution: Calling verify-contribution function');
+    console.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution invoking edge function', { reference });
     // Call the dedicated verify-contribution Edge Function which also updates group balance
     const { data, error } = await supabase.functions.invoke('verify-contribution', {
       body: { reference },
+    });
+    console.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution edge response', {
+      reference,
+      hasError: Boolean(error),
+      success: data?.success,
+      verified: data?.verified,
     });
 
     if (error) {
@@ -403,6 +410,7 @@ export const verifyContributionPayment = async (
 ): Promise<PaymentVerificationResult> => {
   try {
     console.log('verifyContributionPayment: Starting verification for reference:', reference);
+    console.log('[PAYMENT TRACE] verifyContributionPayment start', { reference });
 
     // Ensure session is available before attempting verification
     const sessionAvailable = await ensureSessionAvailable();
@@ -420,9 +428,16 @@ export const verifyContributionPayment = async (
     }
 
     console.log('verifyContributionPayment: Calling verify-contribution function');
+    console.log('[PAYMENT TRACE] verifyContributionPayment invoking edge function', { reference });
     // Call the dedicated verify-contribution Edge Function
     const { data, error } = await supabase.functions.invoke('verify-contribution', {
       body: { reference },
+    });
+    console.log('[PAYMENT TRACE] verifyContributionPayment edge response', {
+      reference,
+      hasError: Boolean(error),
+      success: data?.success,
+      verified: data?.verified,
     });
 
     if (error) {
