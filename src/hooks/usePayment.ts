@@ -17,6 +17,8 @@ import {
   initializeGroupCreationPayment,
   initializeGroupJoinPayment,
   initializeAjoContributionPayment,
+  verifyContributionPayment,
+  verifyPaymentAndActivateMembership,
 } from '@/api/payments';
 import { paystackService } from '@/lib/paystack';
 import type { PaymentMetadata } from '@/lib/paystack';
@@ -125,11 +127,55 @@ export function usePayment(): UsePaymentReturn {
         reference,
         metadata,
         callback_url: `${import.meta.env.VITE_APP_URL}${successUrl}`,
-        onSuccess: () => {
-          console.log('usePayment: Payment successful, redirecting to verification page. Reference:', reference);
-          toast.success('Payment completed! Verifying...', { duration: 2000 });
-          // Use a full-page redirect so the session is cleanly restored before verification
-          window.location.href = successUrl;
+        onSuccess: async (response) => {
+          console.log('usePayment: Paystack onSuccess callback fired', {
+            expectedReference: reference,
+            paystackReference: response?.reference,
+            paymentType: params.type,
+          });
+
+          try {
+            toast.success('Payment completed! Verifying...', { duration: 2000 });
+            console.log('usePayment: Invoking Supabase verification edge function', {
+              paymentType: params.type,
+              reference,
+            });
+
+            const verificationResult =
+              params.type === 'contribution'
+                ? await verifyContributionPayment(reference)
+                : await verifyPaymentAndActivateMembership(reference);
+
+            console.log('usePayment: Verification result', {
+              reference,
+              paymentType: params.type,
+              success: verificationResult.success,
+              verified: verificationResult.verified,
+              error: verificationResult.error,
+            });
+
+            if (verificationResult.success && verificationResult.verified) {
+              const successMessage =
+                params.type === 'contribution'
+                  ? 'Payment verified! Your contribution has been recorded.'
+                  : 'Payment verified successfully! Membership activated.';
+              toast.success(successMessage);
+              setIsProcessing(false);
+
+              // Optional: navigate to success page after verification (not before)
+              if (successUrl) {
+                window.location.href = successUrl;
+              }
+            } else {
+              throw new Error(verificationResult.error || 'Payment verification failed');
+            }
+          } catch (verifyError) {
+            console.error('usePayment: Error verifying payment after Paystack success:', verifyError);
+            const errorMessage =
+              verifyError instanceof Error ? verifyError.message : 'Payment verification failed';
+            toast.error(errorMessage);
+            setIsProcessing(false);
+          }
         },
         onClose: () => {
           // onClose is only called when the user closes the popup without paying
