@@ -82,13 +82,15 @@ export default function PaymentSuccessPage() {
         return;
       }
 
-      // Layer 2 fallback: DB still not updated — call verify-payment edge function directly.
+      // Layer 2 fallback: DB still not updated — call the appropriate verify edge function directly.
+      // Contributions use verify-contribution; membership payments use verify-payment.
       // This covers slow webhooks or cases where the inline verification didn't complete.
-      console.log('[PaymentSuccessPage] Calling verify-payment edge function', {
+      const verifyFn = isContribution ? 'verify-contribution' : 'verify-payment';
+      console.log(`[PaymentSuccessPage] Calling ${verifyFn} edge function`, {
         reference,
         currentStatus: txnStatus ?? 'not found',
       });
-      const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
+      const { data, error: fnError } = await supabase.functions.invoke(verifyFn, {
         body: { reference },
       });
 
