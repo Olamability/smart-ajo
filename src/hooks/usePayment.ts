@@ -131,7 +131,7 @@ export function usePayment(): UsePaymentReturn {
         onSuccess: async (response) => {
           const resolvedReference = response?.reference || reference;
           const resolvedSuccessUrl = `/payment/success?reference=${resolvedReference}&group=${params.groupId}${typeParam}`;
-          let shouldNavigateToSuccess = false;
+          let shouldRedirect = false;
           console.log('usePayment: Paystack onSuccess callback fired', {
             expectedReference: reference,
             paystackReference: response?.reference,
@@ -171,7 +171,7 @@ export function usePayment(): UsePaymentReturn {
                   ? 'Payment verified! Your contribution has been recorded.'
                   : 'Payment verified successfully! Membership activated.';
               toast.success(successMessage);
-              shouldNavigateToSuccess = shouldRedirectAfterVerification;
+              shouldRedirect = shouldRedirectAfterVerification;
             } else {
               throw new Error(verificationResult.error || 'Payment verification failed');
             }
@@ -182,7 +182,7 @@ export function usePayment(): UsePaymentReturn {
             toast.error(userMessage);
           } finally {
             setIsProcessing(false);
-            if (shouldNavigateToSuccess) {
+            if (shouldRedirect) {
               console.log('usePayment: Redirecting to success page after verification', {
                 reference: resolvedReference,
                 successUrl: resolvedSuccessUrl,
