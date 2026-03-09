@@ -178,3 +178,48 @@ export function isInvalidCredentialsError(error: unknown): boolean {
     code === 'invalid_credentials'
   );
 }
+
+/**
+ * Checks if an error is a rate-limit / too-many-requests error
+ *
+ * @param error - The error to check
+ * @returns true if the error is a rate-limit error
+ */
+export function isRateLimitError(error: unknown): boolean {
+  if (!error) return false;
+
+  const authError = error as AuthError;
+  const message = authError.message?.toLowerCase() || '';
+
+  return (
+    authError.status === 429 ||
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('you can only request this after') ||
+    message.includes('email rate limit exceeded') ||
+    message.includes('over_email_send_rate_limit')
+  );
+}
+
+/**
+ * Parses the number of seconds to wait from a Supabase rate-limit error message.
+ * Supabase often returns messages like:
+ *   "For security purposes, you can only request this after 53 seconds."
+ *
+ * @param error - The error to inspect
+ * @returns Wait time in seconds, or a default of 60 if not parseable
+ */
+export function parseRateLimitWaitSeconds(error: unknown): number {
+  const DEFAULT_WAIT_SECONDS = 60;
+
+  if (!error) return DEFAULT_WAIT_SECONDS;
+
+  const message = (error as AuthError).message || '';
+  const match = message.match(/(\d+)\s*second/i);
+  if (match) {
+    const parsed = parseInt(match[1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+
+  return DEFAULT_WAIT_SECONDS;
+}

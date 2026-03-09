@@ -74,6 +74,22 @@ export function isTransientError(error: string | Error | ErrorWithCode): boolean
   const errorCode = typeof error === 'object' && error !== null && 'code' in error
     ? (error as ErrorWithCode).code || ''
     : '';
+
+  const errorStatus = typeof error === 'object' && error !== null && 'status' in error
+    ? (error as { status?: number }).status
+    : undefined;
+
+  // Rate-limit errors (HTTP 429) are never transient – retrying immediately
+  // would only deepen the rate-limit hole.
+  if (
+    errorStatus === 429 ||
+    errorMessage.toLowerCase().includes('rate limit') ||
+    errorMessage.toLowerCase().includes('too many requests') ||
+    errorMessage.toLowerCase().includes('you can only request this after') ||
+    errorMessage.toLowerCase().includes('over_email_send_rate_limit')
+  ) {
+    return false;
+  }
   
   // Network and timeout errors are always transient
   if (errorMessage.includes('timeout') ||

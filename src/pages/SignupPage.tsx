@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -17,8 +17,12 @@ import {
 import { Shield, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { getErrorMessage } from '@/lib/utils';
-import { EmailConfirmationRequiredError } from '@/lib/utils/authErrors';
+import {
+  EmailConfirmationRequiredError,
+  isRateLimitError,
+  parseRateLimitWaitSeconds,
+  mapAuthErrorToMessage,
+} from '@/lib/utils/authErrors';
 
 const signUpSchema = z
   .object({
@@ -38,8 +42,10 @@ type SignUpForm = z.infer<typeof signUpSchema>;
 export default function SignUpPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
+  const [rateLimitCooldown, setRateLimitCooldown] = useState(0);
   const navigate = useNavigate();
   const isMountedRef = useRef(true);
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { signUp } = useAuth();
 
   const {
@@ -54,11 +60,27 @@ export default function SignUpPage() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
     };
+  }, []);
+
+  const startRateLimitCooldown = useCallback((seconds: number) => {
+    if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    setRateLimitCooldown(seconds);
+    cooldownTimerRef.current = setInterval(() => {
+      setRateLimitCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   }, []);
 
   const onSubmit = async (data: SignUpForm) => {
     if (!isMountedRef.current) return;
+    if (rateLimitCooldown > 0) return;
 
     setIsLoading(true);
     setEmailConfirmationRequired(false);
@@ -97,12 +119,24 @@ export default function SignUpPage() {
         return;
       }
 
-      const errorMessage = getErrorMessage(error, 'Failed to create account');
+      // Handle rate-limit errors with a visual cooldown timer
+      if (isRateLimitError(error)) {
+        const waitSeconds = parseRateLimitWaitSeconds(error);
+        startRateLimitCooldown(waitSeconds);
+        // Toast gives an immediate dismissible notification; the inline countdown
+        // below the form provides the persistent wait indicator.
+        toast.error('Too many attempts. Please wait before trying again.');
+        return;
+      }
+
+      const errorMessage = mapAuthErrorToMessage(error);
       toast.error(errorMessage);
     } finally {
       if (isMountedRef.current) setIsLoading(false);
     }
   };
+
+  const isSubmitDisabled = isLoading || rateLimitCooldown > 0;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 px-4 py-12">
@@ -128,7 +162,7 @@ export default function SignUpPage() {
                 id="fullName"
                 placeholder="John Doe"
                 {...register('fullName')}
-                disabled={isLoading}
+                disabled={isSubmitDisabled}
               />
               {errors.fullName && (
                 <p className="text-sm text-destructive">{errors.fullName.message}</p>
@@ -143,7 +177,7 @@ export default function SignUpPage() {
                 type="email"
                 placeholder="john@example.com"
                 {...register('email')}
-                disabled={isLoading}
+                disabled={isSubmitDisabled}
               />
               {errors.email && (
                 <p className="text-sm text-destructive">{errors.email.message}</p>
@@ -158,7 +192,7 @@ export default function SignUpPage() {
                 type="tel"
                 placeholder="+234 800 000 0000"
                 {...register('phone')}
-                disabled={isLoading}
+                disabled={isSubmitDisabled}
               />
               {errors.phone && (
                 <p className="text-sm text-destructive">{errors.phone.message}</p>
@@ -173,7 +207,7 @@ export default function SignUpPage() {
                 type="password"
                 placeholder="••••••••"
                 {...register('password')}
-                disabled={isLoading}
+                disabled={isSubmitDisabled}
               />
               {errors.password && (
                 <p className="text-sm text-destructive">{errors.password.message}</p>
@@ -188,19 +222,27 @@ export default function SignUpPage() {
                 type="password"
                 placeholder="••••••••"
                 {...register('confirmPassword')}
-                disabled={isLoading}
+                disabled={isSubmitDisabled}
               />
               {errors.confirmPassword && (
                 <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
               )}
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            {rateLimitCooldown > 0 && (
+              <p className="text-sm text-destructive text-center">
+                Too many attempts. Please wait {rateLimitCooldown}s before trying again.
+              </p>
+            )}
+
+            <Button type="submit" className="w-full" disabled={isSubmitDisabled}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Creating account...
                 </>
+              ) : rateLimitCooldown > 0 ? (
+                `Wait ${rateLimitCooldown}s…`
               ) : emailConfirmationRequired ? (
                 'Check your email'
               ) : (
