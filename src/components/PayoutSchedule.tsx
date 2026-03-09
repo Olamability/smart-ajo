@@ -37,7 +37,7 @@ interface PayoutScheduleProps {
 }
 
 export default function PayoutSchedule({
-  groupId,
+  groupId: _groupId,
   currentCycle,
   totalCycles,
   netPayoutAmount,

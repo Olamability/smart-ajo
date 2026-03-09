@@ -43,7 +43,7 @@ interface PaystackVerificationResponse {
       paymentType?: string;
       slotNumber?: number;
       cycleId?: string;
-      [key: string]: any;
+      [key: string]: unknown;
     };
     customer: {
       id: number;
@@ -312,6 +312,18 @@ serve(async (req) => {
       }
 
       console.log('Contribution updated successfully');
+
+      // Update group balance (total_collected)
+      const contributionAmountNaira = paymentData.amount / 100;
+      console.log(`Incrementing group ${groupId} total_collected by ${contributionAmountNaira}`);
+      const { error: balanceError } = await supabase.rpc('increment_group_total_collected', {
+        p_group_id: groupId,
+        p_amount: contributionAmountNaira,
+      });
+      if (balanceError) {
+        console.error('Error updating group balance:', JSON.stringify(balanceError));
+        // Non-critical — do not fail the verification
+      }
 
       // Check if all members have contributed for this cycle
       // First get the contribution to find group and cycle info

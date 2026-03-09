@@ -44,8 +44,14 @@ export const getUserStats = async (): Promise<{
       .eq('user_id', user.id);
 
     const totalGroups = groupsData?.length || 0;
-    const activeGroups = groupsData?.filter((gm: any) => gm.groups?.status === 'active').length || 0;
-    const completedGroups = groupsData?.filter((gm: any) => gm.groups?.status === 'completed').length || 0;
+    const activeGroups = groupsData?.filter(gm => {
+      const g = Array.isArray(gm.groups) ? gm.groups[0] : gm.groups;
+      return (g as { status?: string } | null)?.status === 'active';
+    }).length || 0;
+    const completedGroups = groupsData?.filter(gm => {
+      const g = Array.isArray(gm.groups) ? gm.groups[0] : gm.groups;
+      return (g as { status?: string } | null)?.status === 'completed';
+    }).length || 0;
 
     // Get contributions stats
     const { data: contributionsData } = await supabase

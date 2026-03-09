@@ -1,25 +1,18 @@
 /**
- * Paystack Payment Service
- * 
+ * Paystack Payment Service (legacy)
+ *
  * Handles all Paystack payment integrations for the Smart Ajo platform.
  * Uses Paystack Inline JS for popup checkout experience.
- * 
+ *
  * SECURITY NOTE:
  * - Only uses public key on frontend
  * - Payment verification happens on backend (Supabase Edge Functions)
  * - Never expose secret key in frontend code
+ *
+ * @deprecated Prefer paystackService.ts for new code.
  */
 
-// Extend Window interface to include PaystackPop
-declare global {
-  interface Window {
-    PaystackPop: {
-      setup: (config: PaystackConfig) => {
-        openIframe: () => void;
-      };
-    };
-  }
-}
+// Window.PaystackPop is declared in paystackService.ts (single canonical source).
 
 export interface PaystackConfig {
   key?: string;
@@ -28,7 +21,7 @@ export interface PaystackConfig {
   ref?: string; // Unique transaction reference
   reference?: string; // Alternative to ref
   currency?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   callback_url?: string; // Callback URL (note: doesn't work with popup mode)
   onSuccess?: (response: PaystackResponse) => void;
   onCancel?: () => void;
@@ -220,7 +213,7 @@ class PaystackService {
       email: params.email,
       amount: this.toKobo(params.amount),
       ref: params.reference,
-      metadata: params.metadata,
+      metadata: params.metadata as unknown as Record<string, unknown>,
       onSuccess: params.onSuccess,
       onCancel: params.onCancel,
       onClose: params.onClose,
@@ -267,7 +260,7 @@ export const initiatePaystackPayment = async (params: {
     email: params.email,
     amount: paystackService.toKobo(params.amount),
     ref: params.reference,
-    metadata: defaultMetadata,
+    metadata: defaultMetadata as unknown as Record<string, unknown>,
     onSuccess: params.onSuccess,
     onCancel: params.onCancel,
     onClose: params.onClose,

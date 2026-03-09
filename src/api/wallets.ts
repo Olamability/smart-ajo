@@ -25,7 +25,7 @@ export interface WalletTransaction {
   amount: number;
   transaction_type: 'deposit' | 'withdrawal' | 'payout' | 'fee' | 'penalty' | 'refund';
   reference: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 

@@ -31,14 +31,14 @@ interface SlotSelectorProps {
 }
 
 export default function SlotSelector({
-  groupId,
+  groupId: _groupId,
   totalSlots,
   totalMembers,
   availableSlots = [],
   selectedSlot,
   onSlotSelect,
   disabled = false,
-  isCreator,
+  isCreator: _isCreator,
   className,
 }: SlotSelectorProps) {
   const [slots, setSlots] = useState<Slot[]>([]);
