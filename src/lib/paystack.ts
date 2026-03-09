@@ -162,11 +162,11 @@ class PaystackService {
           key: publicKey,
           email: config.email,
           amount: config.amount,
-           ref: config.ref || config.reference || this.generateReference(),
-           currency: config.currency || 'NGN',
-           metadata: config.metadata || {},
-           callback_url: config.callback_url,
-           onSuccess: (response: PaystackResponse) => {
+          ref: config.ref || config.reference || this.generateReference(),
+          currency: config.currency || 'NGN',
+          metadata: config.metadata || {},
+          callback_url: config.callback_url,
+          onSuccess: (response: PaystackResponse) => {
             console.log('[PAYMENT TRACE] Paystack onSuccess callback fired', {
               reference: response.reference,
               status: response.status,
