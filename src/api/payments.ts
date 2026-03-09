@@ -67,15 +67,6 @@ async function ensureSessionAvailable(maxAttempts = 5): Promise<boolean> {
 }
 
 /**
- * Generate a unique payment reference
- */
-function generateReference(): string {
-  const timestamp = Date.now();
-  const random = Math.floor(Math.random() * 1000000);
-  return `AJO-${timestamp}-${random}`;
-}
-
-/**
  * Initialize payment for group creation (creator's initial payment)
  */
 export const initializeGroupCreationPayment = async (
@@ -86,39 +77,22 @@ export const initializeGroupCreationPayment = async (
   try {
     const supabase = createClient();
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, error: 'Not authenticated' };
+    const { data, error } = await supabase.functions.invoke('initialize-payment', {
+      body: {
+        groupId,
+        amount,
+        paymentType: 'group_creation',
+        slotNumber,
+      },
+    });
+
+    if (error || !data?.reference) {
+      const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
+      console.error('Error initializing group creation payment:', message);
+      return { success: false, error: message };
     }
 
-    // Generate payment reference
-    const reference = generateReference();
-
-    // Record payment intent in database
-    const { error: recordError } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: user.id,
-        group_id: groupId,
-        amount: amount,
-        type: 'contribution',
-        status: 'pending',
-        reference: reference,
-        metadata: {
-          userId: user.id,
-          groupId: groupId,
-          paymentType: 'group_creation',
-          slotNumber: slotNumber,
-        },
-      });
-
-    if (recordError) {
-      console.error('Error recording payment intent:', recordError);
-      return { success: false, error: 'Failed to initialize payment' };
-    }
-
-    return { success: true, reference };
+    return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing group creation payment:', error);
     return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
@@ -136,39 +110,22 @@ export const initializeGroupJoinPayment = async (
   try {
     const supabase = createClient();
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, error: 'Not authenticated' };
+    const { data, error } = await supabase.functions.invoke('initialize-payment', {
+      body: {
+        groupId,
+        amount,
+        paymentType: 'group_join',
+        slotNumber,
+      },
+    });
+
+    if (error || !data?.reference) {
+      const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
+      console.error('Error initializing group join payment:', message);
+      return { success: false, error: message };
     }
 
-    // Generate payment reference
-    const reference = generateReference();
-
-    // Record payment intent in database
-    const { error: recordError } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: user.id,
-        group_id: groupId,
-        amount: amount,
-        type: 'contribution',
-        status: 'pending',
-        reference: reference,
-        metadata: {
-          userId: user.id,
-          groupId: groupId,
-          paymentType: 'group_join',
-          slotNumber: slotNumber,
-        },
-      });
-
-    if (recordError) {
-      console.error('Error recording payment intent:', recordError);
-      return { success: false, error: 'Failed to initialize payment' };
-    }
-
-    return { success: true, reference };
+    return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing group join payment:', error);
     return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
@@ -194,39 +151,22 @@ export const initializeAjoContributionPayment = async (params: {
   try {
     const supabase = createClient();
 
-    // Get current user for user_id
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, error: 'Not authenticated' };
-    }
-
-    // Generate unique payment reference
-    const reference = generateReference();
-
-    // Record payment intent in database
-    const { error: recordError } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: user.id,
-        group_id: ajoGroupId,
+    const { data, error } = await supabase.functions.invoke('initialize-payment', {
+      body: {
+        groupId: ajoGroupId,
         amount: amountInKobo,
-        type: 'contribution',
-        status: 'pending',
-        reference,
-        metadata: {
-          userId: user.id,
-          groupId: ajoGroupId,
-          paymentType: 'contribution',
-          contributionId,
-        },
-      });
+        paymentType: 'contribution',
+        contributionId,
+      },
+    });
 
-    if (recordError) {
-      console.error('Error recording Ajo contribution payment intent:', recordError);
-      return { success: false, error: 'Failed to initialize payment' };
+    if (error || !data?.reference) {
+      const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
+      console.error('Error initializing Ajo contribution payment intent:', message);
+      return { success: false, error: message };
     }
 
-    return { success: true, reference };
+    return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing Ajo contribution payment:', error);
     return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
@@ -247,39 +187,22 @@ export const initializeContributionPayment = async (
   try {
     const supabase = createClient();
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { success: false, error: 'Not authenticated' };
+    const { data, error } = await supabase.functions.invoke('initialize-payment', {
+      body: {
+        groupId,
+        amount,
+        paymentType: 'contribution',
+        contributionId,
+      },
+    });
+
+    if (error || !data?.reference) {
+      const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
+      console.error('Error initializing contribution payment:', message);
+      return { success: false, error: message };
     }
 
-    // Generate payment reference
-    const reference = generateReference();
-
-    // Record payment intent in database
-    const { error: recordError } = await supabase
-      .from('transactions')
-      .insert({
-        user_id: user.id,
-        group_id: groupId,
-        amount: amount,
-        type: 'contribution',
-        status: 'pending',
-        reference: reference,
-        metadata: {
-          userId: user.id,
-          groupId: groupId,
-          paymentType: 'contribution',
-          contributionId: contributionId,
-        },
-      });
-
-    if (recordError) {
-      console.error('Error recording payment intent:', recordError);
-      return { success: false, error: 'Failed to initialize payment' };
-    }
-
-    return { success: true, reference };
+    return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing contribution payment:', error);
     return { success: false, error: getErrorMessage(error, 'Failed to initialize payment') };
