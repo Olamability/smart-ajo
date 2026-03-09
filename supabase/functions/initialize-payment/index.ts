@@ -135,7 +135,7 @@ serve(async (req) => {
     });
 
     return new Response(
-      JSON.stringify({ reference, amount, email: user.email }),
+      JSON.stringify({ success: true, reference, amount, email: user.email }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {

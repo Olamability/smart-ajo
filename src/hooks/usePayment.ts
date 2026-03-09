@@ -146,8 +146,10 @@ export function usePayment(): UsePaymentReturn {
           // Layer 2: inline verification — fire-and-forget, do not block the redirect.
           // Even if this fails, the webhook (layer 1) and success page (layer 3) act as fallback.
           // Reuse the supabase client from the outer scope — it already has the user's session.
+          const verifyFn =
+            params.type === 'contribution' ? 'verify-contribution' : 'verify-payment';
           supabase.functions
-            .invoke('verify-payment', { body: { reference: resolvedRef } })
+            .invoke(verifyFn, { body: { reference: resolvedRef } })
             .then(({ data, error: fnErr }) => {
               if (fnErr || !data?.success) {
                 console.warn(
@@ -163,6 +165,7 @@ export function usePayment(): UsePaymentReturn {
             });
 
           // Layer 3: always redirect to success page for user-facing confirmation.
+          setIsProcessing(false);
           window.location.href = resolvedPath;
         },
         onClose: () => {
