@@ -47,9 +47,47 @@ export default function PaymentSuccessPage() {
     setError(null);
 
     try {
-      console.log('[PaymentSuccessPage] Verifying payment', { reference, paymentType });
-
       const supabase = createClient();
+
+      // Layer 1 check: poll the transactions table to see whether the payment was
+      // already recorded by the webhook or the inline verification in usePayment.
+      // Retry a few times with short delays — the webhook may still be in-flight when
+      // the user lands on this page, so give it a moment before falling back.
+      console.log('[PaymentSuccessPage] Polling DB for transaction status', { reference });
+      const DB_POLL_ATTEMPTS = 3;
+      const DB_POLL_DELAY_MS = 600;
+      let txnStatus: string | null = null;
+
+      for (let attempt = 0; attempt < DB_POLL_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise<void>((res) => setTimeout(res, DB_POLL_DELAY_MS));
+        }
+        const { data: txn } = await supabase
+          .from('transactions')
+          .select('status')
+          .eq('reference', reference)
+          .maybeSingle();
+        txnStatus = txn?.status ?? null;
+        if (txnStatus === 'completed') break;
+      }
+
+      if (txnStatus === 'completed') {
+        console.log('[PaymentSuccessPage] Payment already recorded (webhook/inline)', { reference });
+        setVerified(true);
+        const msg = isContribution
+          ? 'Payment verified! Your contribution has been recorded.'
+          : 'Payment verified! Your membership has been activated.';
+        toast.success(msg);
+        setVerifying(false);
+        return;
+      }
+
+      // Layer 2 fallback: DB still not updated — call verify-payment edge function directly.
+      // This covers slow webhooks or cases where the inline verification didn't complete.
+      console.log('[PaymentSuccessPage] Calling verify-payment edge function', {
+        reference,
+        currentStatus: txnStatus ?? 'not found',
+      });
       const { data, error: fnError } = await supabase.functions.invoke('verify-payment', {
         body: { reference },
       });

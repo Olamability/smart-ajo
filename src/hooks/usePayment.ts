@@ -124,8 +124,13 @@ export function usePayment(): UsePaymentReturn {
               slotNumber: params.slotNumber,
             };
 
-      // Step 4: Open the Paystack popup. On success, redirect immediately — do NOT
-      // attempt inline verification here to avoid UI getting stuck in a loading state.
+      // Step 4: Open the Paystack popup.
+      // On success:
+      //   a) Fire an inline verify-payment call in the background (non-blocking).
+      //      This ensures the DB is updated even if the success page redirect fails or
+      //      the user closes the browser tab immediately after payment.
+      //   b) Redirect to PaymentSuccessPage regardless — it shows the confirmed result.
+      // The webhook independently records the payment server-side (primary layer).
       await paystackService.openPopup({
         email: user.email,
         amount: paystackService.toKobo(params.amount),
@@ -134,10 +139,30 @@ export function usePayment(): UsePaymentReturn {
         onSuccess: (response) => {
           const resolvedRef = response.reference ?? reference;
           const resolvedPath = `/payment/success?reference=${resolvedRef}&group=${params.groupId}${typeParam}`;
-          console.log('[usePayment] Payment successful, redirecting to success page', {
-            reference: resolvedRef,
-          });
+
+          console.log('[usePayment] Payment successful', { reference: resolvedRef });
           toast.success('Payment completed! Verifying…');
+
+          // Layer 2: inline verification — fire-and-forget, do not block the redirect.
+          // Even if this fails, the webhook (layer 1) and success page (layer 3) act as fallback.
+          // Reuse the supabase client from the outer scope — it already has the user's session.
+          supabase.functions
+            .invoke('verify-payment', { body: { reference: resolvedRef } })
+            .then(({ data, error: fnErr }) => {
+              if (fnErr || !data?.success) {
+                console.warn(
+                  '[usePayment] Inline verification attempt failed — webhook and success page will handle it',
+                  fnErr?.message ?? data?.error
+                );
+              } else {
+                console.log('[usePayment] Inline verification succeeded', { reference: resolvedRef });
+              }
+            })
+            .catch((err: unknown) => {
+              console.warn('[usePayment] Inline verification error (non-critical):', err);
+            });
+
+          // Layer 3: always redirect to success page for user-facing confirmation.
           window.location.href = resolvedPath;
         },
         onClose: () => {

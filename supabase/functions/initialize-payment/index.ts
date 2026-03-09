@@ -93,6 +93,11 @@ serve(async (req) => {
 
     const reference = generateReference();
 
+    // Map paymentType to the transaction_type_enum value in the DB.
+    // group_creation / group_join are security deposits; contribution is a regular contribution.
+    const transactionType =
+      paymentType === 'contribution' ? 'contribution' : 'security_deposit';
+
     // Use service role client to insert the transaction (bypasses RLS).
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -100,7 +105,7 @@ serve(async (req) => {
       user_id: user.id,
       group_id: groupId,
       amount,
-      type: 'contribution',
+      type: transactionType,
       status: 'pending',
       reference,
       metadata: {
