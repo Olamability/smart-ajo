@@ -2,8 +2,10 @@
  * usePayment Hook
  *
  * Handles the Paystack payment flow with Supabase edge functions.
- * Fixes previous 401 unauthorized errors by attaching the user's JWT
- * to all edge function calls (initialize-payment and verify-payment/verify-contribution).
+ * Uses the singleton Supabase client (src/lib/client/supabase.ts) to ensure
+ * the in-memory auth session is shared with AuthContext, avoiding the 401
+ * Unauthorized errors that occurred when fresh client instances hadn't yet
+ * loaded the session from cookies before invoking Edge Functions.
  *
  * Usage:
  *   const { initiatePayment, isProcessing } = usePayment();
@@ -63,10 +65,20 @@ export function usePayment(): UsePaymentReturn {
     try {
       const supabase = createClient();
 
-      // Get the current user's session token
-      const { data: sessionData } = await supabase.auth.getSession();
+      // Obtain the current user's access token from the shared singleton
+      // session. Because AuthContext keeps this singleton alive and manages
+      // token refresh, getSession() returns the in-memory value immediately
+      // without an extra network round-trip.
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
-      const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+
+      if (sessionError || !accessToken) {
+        toast.error('Session expired. Please log in again.');
+        setIsProcessing(false);
+        return;
+      }
+
+      const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
       // Step 1: Create pending transaction via initialize-payment
       const initBody =
