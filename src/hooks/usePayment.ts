@@ -87,10 +87,15 @@ export function usePayment(): UsePaymentReturn {
               slotNumber: params.slotNumber,
             };
 
+      // Retrieve the current session so we can attach the JWT to edge function calls.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+
       console.log('[usePayment] Calling initialize-payment edge function', initBody);
       const { data: initData, error: initError } = await supabase.functions.invoke(
         'initialize-payment',
-        { body: initBody }
+        { body: initBody, headers: authHeaders }
       );
 
       if (initError || !initData?.reference) {
@@ -149,7 +154,7 @@ export function usePayment(): UsePaymentReturn {
           const verifyFn =
             params.type === 'contribution' ? 'verify-contribution' : 'verify-payment';
           supabase.functions
-            .invoke(verifyFn, { body: { reference: resolvedRef } })
+            .invoke(verifyFn, { body: { reference: resolvedRef }, headers: authHeaders })
             .then(({ data, error: fnErr }) => {
               if (fnErr || !data?.success) {
                 console.warn(
