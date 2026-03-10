@@ -1,15 +1,9 @@
 /**
  * usePayment Hook
  *
- * Orchestrates the full Paystack payment flow:
- * 1. Call the initialize-payment edge function to create a pending transaction
- * 2. Open the Paystack inline popup
- * 3. On success, redirect to PaymentSuccessPage — the backend does the verification
- *
- * The UI is NEVER the source of truth for payment success.
- * Verification happens in the verify-payment edge function called by PaymentSuccessPage.
- * The paystack-webhook edge function provides a fallback that records payment even
- * if the user closes their browser before reaching the success page.
+ * Handles the Paystack payment flow with Supabase edge functions.
+ * Fixes previous 401 unauthorized errors by attaching the user's JWT
+ * to all edge function calls (initialize-payment and verify-payment/verify-contribution).
  *
  * Usage:
  *   const { initiatePayment, isProcessing } = usePayment();
@@ -69,8 +63,12 @@ export function usePayment(): UsePaymentReturn {
     try {
       const supabase = createClient();
 
-      // Step 1: Create a pending transaction via the initialize-payment edge function.
-      // The edge function is the authoritative source for the reference and amount.
+      // Get the current user's session token
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+
+      // Step 1: Create pending transaction via initialize-payment
       const initBody =
         params.type === 'contribution'
           ? {
@@ -87,12 +85,8 @@ export function usePayment(): UsePaymentReturn {
               slotNumber: params.slotNumber,
             };
 
-      // Retrieve the current session so we can attach the JWT to edge function calls.
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      const authHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
-
       console.log('[usePayment] Calling initialize-payment edge function', initBody);
+
       const { data: initData, error: initError } = await supabase.functions.invoke(
         'initialize-payment',
         { body: initBody, headers: authHeaders }
@@ -109,10 +103,9 @@ export function usePayment(): UsePaymentReturn {
       const { reference } = initData as { reference: string };
       console.log('[usePayment] Pending transaction created', { reference });
 
-      // Step 2: Build the type query param used in the success URL.
       const typeParam = params.type === 'contribution' ? '&type=contribution' : '';
 
-      // Step 3: Build metadata to pass to Paystack (the webhook also reads this).
+      // Build Paystack metadata
       const metadata: PaymentMetadata =
         params.type === 'contribution'
           ? {
@@ -129,13 +122,7 @@ export function usePayment(): UsePaymentReturn {
               slotNumber: params.slotNumber,
             };
 
-      // Step 4: Open the Paystack popup.
-      // On success:
-      //   a) Fire an inline verify-payment call in the background (non-blocking).
-      //      This ensures the DB is updated even if the success page redirect fails or
-      //      the user closes the browser tab immediately after payment.
-      //   b) Redirect to PaymentSuccessPage regardless — it shows the confirmed result.
-      // The webhook independently records the payment server-side (primary layer).
+      // Step 2: Open Paystack popup
       await paystackService.openPopup({
         email: user.email,
         amount: paystackService.toKobo(params.amount),
@@ -148,9 +135,7 @@ export function usePayment(): UsePaymentReturn {
           console.log('[usePayment] Payment successful', { reference: resolvedRef });
           toast.success('Payment completed! Verifying…');
 
-          // Layer 2: inline verification — fire-and-forget, do not block the redirect.
-          // Even if this fails, the webhook (layer 1) and success page (layer 3) act as fallback.
-          // Reuse the supabase client from the outer scope — it already has the user's session.
+          // Layer 2: inline fire-and-forget verification
           const verifyFn =
             params.type === 'contribution' ? 'verify-contribution' : 'verify-payment';
           supabase.functions
@@ -158,7 +143,7 @@ export function usePayment(): UsePaymentReturn {
             .then(({ data, error: fnErr }) => {
               if (fnErr || !data?.success) {
                 console.warn(
-                  '[usePayment] Inline verification attempt failed — webhook and success page will handle it',
+                  '[usePayment] Inline verification failed — webhook & success page fallback',
                   fnErr?.message ?? data?.error
                 );
               } else {
@@ -169,7 +154,7 @@ export function usePayment(): UsePaymentReturn {
               console.warn('[usePayment] Inline verification error (non-critical):', err);
             });
 
-          // Layer 3: always redirect to success page for user-facing confirmation.
+          // Layer 3: redirect to success page
           setIsProcessing(false);
           window.location.href = resolvedPath;
         },
@@ -179,9 +164,6 @@ export function usePayment(): UsePaymentReturn {
           setIsProcessing(false);
         },
       });
-
-      // Note: if openPopup resolves without onSuccess being called (popup closed),
-      // setIsProcessing(false) was already called in onClose.
     } catch (error) {
       console.error('[usePayment] Unexpected payment error:', error);
       toast.error('Failed to initialize payment. Please try again.');
