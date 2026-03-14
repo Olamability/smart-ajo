@@ -1699,7 +1699,8 @@ RETURNS TABLE (
   joined_at TIMESTAMPTZ,
   full_name TEXT,
   email TEXT,
-  phone TEXT
+  phone TEXT,
+  total_contributions BIGINT
 ) AS $$
 BEGIN
   -- Check if the requesting user is a member of this group or is the group creator
@@ -1716,7 +1717,7 @@ BEGIN
     RAISE EXCEPTION 'Not authorized to view members of this group';
   END IF;
 
-  -- Return all members of the group
+  -- Return all members of the group with contribution count
   RETURN QUERY
   SELECT 
     gm.user_id,
@@ -1729,11 +1730,44 @@ BEGIN
     gm.joined_at,
     u.full_name,
     u.email,
-    u.phone
+    u.phone,
+    COUNT(c.id) FILTER (WHERE c.status = 'paid') AS total_contributions
   FROM group_members gm
   JOIN users u ON gm.user_id = u.id
+  LEFT JOIN contributions c ON c.group_id = gm.group_id AND c.user_id = gm.user_id
   WHERE gm.group_id = p_group_id
+  GROUP BY gm.user_id, gm.group_id, gm.position, gm.status, gm.security_deposit_amount,
+           gm.has_paid_security_deposit, gm.security_deposit_paid_at, gm.joined_at,
+           u.full_name, u.email, u.phone
   ORDER BY gm.position ASC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ----------------------------------------------------------------------------
+-- RPC: get_taken_slots
+-- Returns slot numbers already taken (by active members or pending join requests)
+-- for a group. Accessible to all authenticated users without exposing user data.
+-- Used by the slot selector to prevent double-booking.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION get_taken_slots(p_group_id UUID)
+RETURNS TABLE (slot_number INTEGER) AS $$
+BEGIN
+  RETURN QUERY
+  -- Slots assigned to existing members
+  SELECT gm.position AS slot_number
+  FROM group_members gm
+  WHERE gm.group_id = p_group_id
+    AND gm.status NOT IN ('removed')
+    AND gm.position IS NOT NULL
+
+  UNION
+
+  -- Slots reserved by pending join requests
+  SELECT jr.preferred_slot AS slot_number
+  FROM group_join_requests jr
+  WHERE jr.group_id = p_group_id
+    AND jr.status = 'pending'
+    AND jr.preferred_slot IS NOT NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

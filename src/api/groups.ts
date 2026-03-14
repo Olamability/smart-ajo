@@ -194,30 +194,75 @@ export const getUserGroups = async (): Promise<{
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
-    const groups: Group[] = (data || []).map((group) => ({
-      id: group.id,
-      name: group.name,
-      description: group.description,
-      createdBy: group.created_by,
-      creatorProfileImage: group.creator_profile_image,
-      creatorPhone: group.creator_phone,
-      contributionAmount: group.contribution_amount,
-      frequency: group.frequency,
-      totalMembers: group.total_members,
-      currentMembers: group.current_members || 0,
-      securityDepositAmount: group.security_deposit_amount,
-      securityDepositPercentage: group.security_deposit_percentage,
-      status: group.status,
-      createdAt: group.created_at,
-      updatedAt: group.updated_at,
-      startDate: group.start_date,
-      endDate: group.end_date,
-      currentCycle: group.current_cycle,
-      totalCycles: group.total_cycles,
-      rotationOrder: [],
-      members: [],
-      serviceFeePercentage: group.service_fee_percentage || DEFAULT_SERVICE_FEE_PERCENTAGE,
-    }));
+    const groupIds = data.map((g) => g.id);
+
+    // Fetch the current user's own membership records for all relevant groups
+    // This is needed to correctly determine payment status on the groups list page
+    interface UserMembershipRow {
+      group_id: string;
+      has_paid_security_deposit: boolean;
+      status: 'pending' | 'active' | 'suspended' | 'removed';
+      position: number | null;
+      security_deposit_amount: number;
+      joined_at: string;
+    }
+    let userMembershipMap = new Map<string, UserMembershipRow>();
+    if (groupIds.length > 0) {
+      const { data: memberships } = await supabase
+        .from('group_members')
+        .select('group_id, has_paid_security_deposit, status, position, security_deposit_amount, joined_at')
+        .eq('user_id', user.id)
+        .in('group_id', groupIds);
+
+      (memberships as UserMembershipRow[] | null || []).forEach((m) => {
+        userMembershipMap.set(m.group_id, m);
+      });
+    }
+
+    const groups: Group[] = (data || []).map((group) => {
+      const myMembership = userMembershipMap.get(group.id);
+      const members: GroupMember[] = myMembership
+        ? [
+            {
+              userId: user.id,
+              userName: '',
+              joinedAt: myMembership.joined_at,
+              rotationPosition: myMembership.position,
+              securityDepositPaid: myMembership.has_paid_security_deposit,
+              securityDepositAmount: myMembership.security_deposit_amount,
+              status: myMembership.status,
+              totalContributions: 0,
+              totalPenalties: 0,
+              hasReceivedPayout: false,
+            },
+          ]
+        : [];
+
+      return {
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        createdBy: group.created_by,
+        creatorProfileImage: group.creator_profile_image,
+        creatorPhone: group.creator_phone,
+        contributionAmount: group.contribution_amount,
+        frequency: group.frequency,
+        totalMembers: group.total_members,
+        currentMembers: group.current_members || 0,
+        securityDepositAmount: group.security_deposit_amount,
+        securityDepositPercentage: group.security_deposit_percentage,
+        status: group.status,
+        createdAt: group.created_at,
+        updatedAt: group.updated_at,
+        startDate: group.start_date,
+        endDate: group.end_date,
+        currentCycle: group.current_cycle,
+        totalCycles: group.total_cycles,
+        rotationOrder: [],
+        members,
+        serviceFeePercentage: group.service_fee_percentage || DEFAULT_SERVICE_FEE_PERCENTAGE,
+      };
+    });
 
     return { success: true, groups };
   } catch (error) {
@@ -816,6 +861,38 @@ export const deleteGroup = async (
     return {
       success: false,
       error: getErrorMessage(error, 'Failed to delete group'),
+    };
+  }
+};
+
+
+/**
+ * Get slot numbers that are already taken (by members or pending join requests).
+ * Returns just the slot numbers without any user info, accessible to all authenticated users.
+ * Used by the slot selector to mark slots as unavailable when showing the join dialog.
+ */
+export const getTakenSlots = async (
+  groupId: string
+): Promise<{ success: boolean; takenSlots?: number[]; error?: string }> => {
+  try {
+    const supabase = createClient();
+
+    const { data, error } = await supabase.rpc('get_taken_slots', {
+      p_group_id: groupId,
+    });
+
+    if (error) {
+      console.error('Error fetching taken slots:', error);
+      return { success: false, error: error.message };
+    }
+
+    const takenSlots: number[] = (data || []).map((row: { slot_number: number }) => row.slot_number);
+    return { success: true, takenSlots };
+  } catch (error) {
+    console.error('Get taken slots error:', error);
+    return {
+      success: false,
+      error: getErrorMessage(error, 'Failed to fetch taken slots'),
     };
   }
 };
