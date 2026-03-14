@@ -146,7 +146,7 @@ export const getUserGroups = async (): Promise<{
     // Query groups where user is a member OR is the creator
     // Using two separate queries for clarity and combining results
     // This approach is clearer and handles both cases explicitly
-    
+
     // Get groups where user is creator
     const { data: createdGroups, error: createdError } = await supabase
       .from('groups')
@@ -176,21 +176,21 @@ export const getUserGroups = async (): Promise<{
 
     // Combine and deduplicate groups
     const allGroupsMap = new Map<string, any>();
-    
+
     // Add created groups
     (createdGroups || []).forEach(group => {
       allGroupsMap.set(group.id, group);
     });
-    
+
     // Add member groups (won't overwrite if already exists)
     (memberGroups || []).forEach(group => {
       if (!allGroupsMap.has(group.id)) {
         allGroupsMap.set(group.id, group);
       }
     });
-    
+
     // Convert map to array and sort by created_at
-    const data = Array.from(allGroupsMap.values()).sort((a, b) => 
+    const data = Array.from(allGroupsMap.values()).sort((a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
@@ -625,7 +625,7 @@ export const rejectJoinRequest = async (
     const { data, error } = await supabase.rpc('reject_join_request', {
       p_request_id: requestId,
       p_reviewer_id: user.id,
-      p_rejection_reason: reason || null,
+      p_reason: reason || null,
     });
 
     if (error) {

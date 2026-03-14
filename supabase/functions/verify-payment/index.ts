@@ -302,6 +302,45 @@ serve(async (req) => {
           : 'Your security deposit was received. Welcome to the group!',
         p_metadata: { groupId, paymentType, reference: paymentData.reference },
       });
+
+      // ── upfront payment handling ──────────────────────────────────────────
+      // When joining or creating a group, the user pays security deposit + 
+      // first contribution. We must record the contribution part here so it
+      // shows up in the UI as paid.
+      console.log('[verify-payment] Handling upfront contribution');
+      const { data: group } = await supabase
+        .from('groups')
+        .select('contribution_amount')
+        .eq('id', groupId)
+        .single();
+
+      if (group) {
+        // Record the first cycle contribution as paid
+        const { error: contribError } = await supabase
+          .from('contributions')
+          .insert({
+            group_id: groupId,
+            user_id: userId,
+            amount: group.contribution_amount,
+            cycle_number: 1,
+            status: 'paid',
+            paid_date: new Date().toISOString(),
+            transaction_ref: reference,
+            due_date: new Date().toISOString(),
+          });
+
+        if (contribError) {
+          console.error('[verify-payment] Upfront contribution error:', JSON.stringify(contribError));
+        } else {
+          console.log('[verify-payment] Upfront contribution recorded');
+          // Update group total_collected
+          const { error: balanceError } = await supabase.rpc('increment_group_total_collected', {
+            p_group_id: groupId,
+            p_amount: group.contribution_amount
+          });
+          if (balanceError) console.error('[verify-payment] Balance update error:', JSON.stringify(balanceError));
+        }
+      }
     }
 
     // Write audit log for payment verification

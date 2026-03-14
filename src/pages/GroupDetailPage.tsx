@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  getGroupById, 
-  getGroupMembers, 
+import {
+  getGroupById,
+  getGroupMembers,
   joinGroup,
   getPendingJoinRequests,
   approveJoinRequest,
@@ -14,7 +14,7 @@ import type { Group, GroupMember } from '@/types';
 import { usePayment } from '@/hooks/usePayment';
 import ContributionsList from '@/components/ContributionsList';
 import PayoutSchedule from '@/components/PayoutSchedule';
-import SlotSelector from '@/components/SlotSelector';
+import SlotSelector, { Slot } from '@/components/SlotSelector';
 import PaymentBreakdown from '@/components/PaymentBreakdown';
 import { Button } from '@/components/ui/button';
 import {
@@ -93,9 +93,27 @@ export default function GroupDetailPage() {
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
-  
+
   // State for join request status tracking
   const [userJoinRequest, setUserJoinRequest] = useState<Record<string, unknown> | null>(null);
+
+  // Calculate available slots based on current members and join requests
+  const availableSlotsData: Slot[] = [
+    ...members
+      .filter(m => m.position)
+      .map(m => ({
+        position: m.position as number,
+        isAvailable: false,
+        userName: m.fullName || m.email
+      })),
+    ...joinRequests
+      .filter(r => r.preferred_slot)
+      .map(r => ({
+        position: r.preferred_slot as number,
+        isAvailable: false,
+        userName: r.user_name
+      }))
+  ];
 
   // Initial load effect
   useEffect(() => {
@@ -116,13 +134,13 @@ export default function GroupDetailPage() {
       if (import.meta.env.DEV) {
         console.log('Reloading data after payment verification...');
       }
-      
+
       // Reload all data to reflect updated membership status
       loadGroupDetails();
       loadMembers();
       loadJoinRequests();
       loadUserJoinRequestStatus();
-      
+
       // Remove the reload parameter from URL to avoid reloading on every render
       navigate(`/groups/${id}`, { replace: true });
     }
@@ -240,12 +258,12 @@ export default function GroupDetailPage() {
   const handlePaySecurityDeposit = async () => {
     // For creators: require selectedSlot, for members: require currentUserMember
     if (!group || !user || !id) return;
-    
+
     if (isCreator && !selectedSlot) {
       toast.error('Please select a payout slot before making payment');
       return;
     }
-    
+
     if (!isCreator && !currentUserMember) {
       toast.error('Unable to process payment. Please try again or contact support.');
       return;
@@ -464,7 +482,7 @@ export default function GroupDetailPage() {
                 </div>
               </AlertDescription>
             </Alert>
-            
+
             {/* Slot Selection for Creator */}
             <Card>
               <CardHeader>
@@ -478,11 +496,12 @@ export default function GroupDetailPage() {
                   groupId={id}
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
+                  availableSlots={availableSlotsData}
                   disabled={isProcessingPayment}
                   isCreator={isCreator}
                   totalMembers={group.totalMembers}
                 />
-                
+
                 {selectedSlot && (
                   <div className="mt-4 space-y-3">
                     <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -518,8 +537,8 @@ export default function GroupDetailPage() {
                         <>
                           <CreditCard className="w-4 h-4 mr-2" />
                           Pay {formatCurrency(
-                            group.securityDepositAmount + 
-                            group.contributionAmount + 
+                            group.securityDepositAmount +
+                            group.contributionAmount +
                             (group.contributionAmount * (group.serviceFeePercentage || 2) / 100)
                           )} to Activate Group
                         </>
@@ -546,7 +565,7 @@ export default function GroupDetailPage() {
                     Complete your payment to activate your membership and secure your payout position.
                   </p>
                 </div>
-                
+
                 <div className="p-3 bg-white border border-green-200 rounded-lg">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Your Payout Position:</span>
@@ -582,8 +601,8 @@ export default function GroupDetailPage() {
                     <>
                       <CreditCard className="w-4 h-4 mr-2" />
                       Pay {formatCurrency(
-                        group.securityDepositAmount + 
-                        group.contributionAmount + 
+                        group.securityDepositAmount +
+                        group.contributionAmount +
                         (group.contributionAmount * (group.serviceFeePercentage || 2) / 100)
                       )} to Join
                     </>
@@ -647,6 +666,7 @@ export default function GroupDetailPage() {
                   groupId={id}
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
+                  availableSlots={availableSlotsData}
                   disabled={isJoining}
                   isCreator={false}
                   totalMembers={group.totalMembers}
@@ -799,7 +819,7 @@ export default function GroupDetailPage() {
                     {formatCurrency(calculateNetPayout())}
                   </span>
                 </div>
-                
+
                 <Alert className="mt-4">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="text-xs">
@@ -832,7 +852,7 @@ export default function GroupDetailPage() {
                     {formatCurrency(group.securityDepositAmount)}
                   </span>
                 </div>
-                
+
                 {/* Security Deposit Payment Status */}
                 {currentUserMember && (
                   <div className="pt-4 border-t">
@@ -921,9 +941,8 @@ export default function GroupDetailPage() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex items-start gap-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                      group.currentMembers === group.totalMembers ? 'bg-green-500' : 'bg-yellow-500'
-                    }`}>
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center ${group.currentMembers === group.totalMembers ? 'bg-green-500' : 'bg-yellow-500'
+                      }`}>
                       {group.currentMembers === group.totalMembers ? '✓' : '•'}
                     </div>
                     <div className="flex-1">
@@ -979,12 +998,12 @@ export default function GroupDetailPage() {
                         <Avatar className="w-12 h-12 flex-shrink-0">
                           <AvatarImage src={request.user_avatar_url || undefined} />
                           <AvatarFallback className="bg-yellow-100 text-yellow-700">
-                            {request.user_name && request.user_name.length >= 2 
+                            {request.user_name && request.user_name.length >= 2
                               ? request.user_name.substring(0, 2).toUpperCase()
                               : request.user_name?.charAt(0).toUpperCase() || '?'}
                           </AvatarFallback>
                         </Avatar>
-                        
+
                         <div className="flex-1 min-w-0">
                           {/* User Info */}
                           <div className="space-y-1">
@@ -999,7 +1018,7 @@ export default function GroupDetailPage() {
                               )}
                             </div>
                           </div>
-                          
+
                           {/* Requested Slot */}
                           {request.preferred_slot && (
                             <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-white border border-yellow-300 rounded-md">
@@ -1011,7 +1030,7 @@ export default function GroupDetailPage() {
                               </Badge>
                             </div>
                           )}
-                          
+
                           {/* Message */}
                           {request.message && (
                             <div className="mt-2 p-2 bg-white border border-yellow-200 rounded text-sm text-gray-700 italic">
@@ -1019,7 +1038,7 @@ export default function GroupDetailPage() {
                             </div>
                           )}
                         </div>
-                        
+
                         {/* Action Buttons */}
                         <div className="flex flex-col gap-2 flex-shrink-0">
                           <Button
@@ -1116,7 +1135,7 @@ export default function GroupDetailPage() {
                         </div>
                       </div>
                     ))}
-                    
+
                     {/* Empty slots */}
                     {Array.from({ length: group.totalMembers - members.length }).map((_, i) => (
                       <div key={`empty-${i}`} className="flex items-center gap-3 p-3 border border-dashed rounded-lg opacity-50">
