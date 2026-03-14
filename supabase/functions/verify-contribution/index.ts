@@ -322,6 +322,22 @@ serve(async (req) => {
       p_metadata: { groupId, contributionId, reference: paymentData.reference },
     });
 
+    // Step 3f: Write audit log for contribution verification
+    await supabase.from('audit_logs').insert({
+      user_id: userId,
+      action: 'contribution_verified',
+      resource_type: 'contribution',
+      resource_id: contributionId,
+      details: {
+        groupId,
+        reference: paymentData.reference,
+        amount_naira: contributionAmountNaira,
+        paidAt: paymentData.paid_at,
+      },
+    }).then(({ error }) => {
+      if (error) console.error('[verify-contribution] Audit log insert failed:', error);
+    });
+
     // Return success response
     console.log('Contribution payment verification completed successfully');
     return new Response(

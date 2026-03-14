@@ -304,6 +304,23 @@ serve(async (req) => {
       });
     }
 
+    // Write audit log for payment verification
+    await supabase.from('audit_logs').insert({
+      user_id: userId,
+      action: 'security_deposit_verified',
+      resource_type: 'transaction',
+      resource_id: reference,
+      details: {
+        groupId,
+        paymentType,
+        amount: paymentData.amount,
+        paidAt: paymentData.paid_at,
+        ...(slotNumber !== undefined ? { slotNumber } : {}),
+      },
+    }).then(({ error }) => {
+      if (error) console.error('[verify-payment] Audit log insert failed:', error);
+    });
+
     // Return success response
     console.log('Payment verification completed successfully');
     return new Response(

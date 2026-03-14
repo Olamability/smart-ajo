@@ -439,6 +439,36 @@ export const getPaymentByReference = async (reference: string): Promise<Record<s
   }
 };
 
+/**
+ * Trigger the payout-process edge function to initiate pending payouts.
+ * Can target a specific payout, a group's payouts, or all pending payouts.
+ *
+ * @param options.payoutId - Process a single payout by ID
+ * @param options.groupId - Process all pending payouts for a group
+ */
+export const triggerPayoutProcess = async (options?: {
+  payoutId?: string;
+  groupId?: string;
+}): Promise<{ success: boolean; processed?: number; initiated?: number; failed?: number; error?: string }> => {
+  try {
+    const supabase = createClient();
+
+    const { data, error } = await supabase.functions.invoke('payout-process', {
+      body: options ?? {},
+    });
+
+    if (error) {
+      console.error('triggerPayoutProcess: Edge function error:', error);
+      return { success: false, error: error.message || 'Payout processing failed' };
+    }
+
+    return data as { success: boolean; processed: number; initiated: number; failed: number };
+  } catch (error) {
+    console.error('triggerPayoutProcess: Unexpected error:', error);
+    return { success: false, error: getErrorMessage(error, 'Payout processing failed') };
+  }
+};
+
 export interface HealthCheckResult {
   status: 'ok' | 'degraded';
   timestamp: string;
