@@ -26,6 +26,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-paystack-signature',
 };
 
+/**
+ * Write a record to audit_logs. Failures are swallowed so they never
+ * interrupt the main webhook processing flow.
+ */
+async function logAuditEvent(
+  supabase: SupabaseClient,
+  action: string,
+  resourceType: string,
+  resourceId: string,
+  details: Record<string, unknown>,
+  userId?: string,
+): Promise<void> {
+  try {
+    await supabase.from('audit_logs').insert({
+      user_id: userId ?? null,
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      details,
+    });
+  } catch (err) {
+    console.error('[paystack-webhook] Audit log write failed:', err);
+  }
+}
+
 interface PaystackWebhookEvent {
   event: string;
   data: {
@@ -55,6 +80,22 @@ interface PaystackWebhookEvent {
       customer_code: string;
     };
   };
+}
+
+/** Shape of event.data for transfer.success / transfer.failed webhook events */
+interface PaystackTransferWebhookData {
+  id: number;
+  domain: string;
+  amount: number;
+  currency: string;
+  reference: string;       // Our reference passed during transfer initiation
+  transfer_code: string;   // Paystack's internal transfer code
+  status: string;
+  reason: string;
+  source: string;
+  failures: unknown;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -281,6 +322,15 @@ async function processPaymentSuccess(
     });
   }
 
+  // Audit log the successful payment processing
+  await logAuditEvent(supabase, 'webhook_payment_processed', 'transaction', reference, {
+    event: 'charge.success',
+    paymentType,
+    userId,
+    groupId,
+    amount: eventData.amount,
+  }, userId);
+
   return { success: true, reference, status: 'processed' };
 }
 
@@ -366,18 +416,134 @@ serve(async (req) => {
               reason: event.data.gateway_response,
             },
           });
+
+          await logAuditEvent(supabase, 'webhook_payment_failed', 'transaction', event.data.reference, {
+            event: 'charge.failed',
+            reason: event.data.gateway_response,
+          }, failedUserId);
         }
 
         result = { success: true, status: 'failed_payment_recorded' };
         break;
       }
-      
-      case 'transfer.success':
-      case 'transfer.failed':
-        // Handle payout webhooks (future implementation)
-        console.log(`Received ${event.event} webhook - not yet implemented`);
-        result = { success: true, status: 'acknowledged' };
+
+      case 'transfer.success': {
+        // Payout transfer completed — mark payout and transaction as completed
+        const transferEventData = event.data as unknown as PaystackTransferWebhookData;
+        const transferCode = transferEventData.transfer_code ?? transferEventData.reference;
+
+        const { data: payoutRecord } = await supabase
+          .from('payouts')
+          .select('id, recipient_id, cycle_number, related_group_id')
+          .eq('payment_reference', transferCode)
+          .single();
+
+        if (payoutRecord) {
+          await supabase
+            .from('payouts')
+            .update({
+              status: 'completed',
+              payout_date: new Date().toISOString().split('T')[0],
+            })
+            .eq('id', payoutRecord.id);
+
+          // Update the matching payout transaction record using payout_id in metadata
+          await supabase
+            .from('transactions')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .contains('metadata', { payout_id: payoutRecord.id })
+            .eq('type', 'payout');
+
+          // Notify the recipient that their payout has been sent
+          await supabase.rpc('send_payment_notification', {
+            p_user_id: payoutRecord.recipient_id,
+            p_type: 'payout_processed',
+            p_title: 'Payout sent!',
+            p_message: `Your payout for cycle ${payoutRecord.cycle_number} has been sent to your bank account.`,
+            p_metadata: {
+              payout_id: payoutRecord.id,
+              cycle_number: payoutRecord.cycle_number,
+              group_id: payoutRecord.related_group_id,
+              transfer_code: transferCode,
+            },
+          });
+
+          await logAuditEvent(supabase, 'payout_completed', 'payout', payoutRecord.id, {
+            transfer_code: transferCode,
+            recipient_id: payoutRecord.recipient_id,
+            cycle_number: payoutRecord.cycle_number,
+            group_id: payoutRecord.related_group_id,
+          }, payoutRecord.recipient_id);
+
+          console.log(`[paystack-webhook] Payout ${payoutRecord.id} marked as completed`);
+        } else {
+          console.warn(`[paystack-webhook] No payout found for transfer_code: ${transferCode}`);
+        }
+
+        result = { success: true, status: 'transfer_success_processed' };
         break;
+      }
+
+      case 'transfer.failed': {
+        // Payout transfer failed — revert payout to pending for retry
+        const failedTransferEventData = event.data as unknown as PaystackTransferWebhookData;
+        const failedTransferCode = failedTransferEventData.transfer_code ?? failedTransferEventData.reference;
+        const failureReason = failedTransferEventData.reason ?? event.data.gateway_response;
+
+        const { data: failedPayout } = await supabase
+          .from('payouts')
+          .select('id, recipient_id, cycle_number, related_group_id')
+          .eq('payment_reference', failedTransferCode)
+          .single();
+
+        if (failedPayout) {
+          // Revert payout status to pending for retry
+          await supabase
+            .from('payouts')
+            .update({
+              status: 'pending',
+              notes: `Transfer failed: ${failureReason}`,
+              payment_reference: null,
+            })
+            .eq('id', failedPayout.id);
+
+          // Update the matching payout transaction to failed using payout_id in metadata
+          await supabase
+            .from('transactions')
+            .update({ status: 'failed' })
+            .contains('metadata', { payout_id: failedPayout.id })
+            .eq('type', 'payout');
+
+          // Notify recipient about the failed payout
+          await supabase.rpc('send_payment_notification', {
+            p_user_id: failedPayout.recipient_id,
+            p_type: 'payout_processed',
+            p_title: 'Payout failed',
+            p_message: 'Your payout could not be processed. Our team will retry automatically.',
+            p_metadata: {
+              payout_id: failedPayout.id,
+              cycle_number: failedPayout.cycle_number,
+              group_id: failedPayout.related_group_id,
+              reason: failureReason,
+            },
+          });
+
+          await logAuditEvent(supabase, 'payout_transfer_failed', 'payout', failedPayout.id, {
+            transfer_code: failedTransferCode,
+            reason: failureReason,
+            recipient_id: failedPayout.recipient_id,
+            cycle_number: failedPayout.cycle_number,
+            group_id: failedPayout.related_group_id,
+          }, failedPayout.recipient_id);
+
+          console.log(`[paystack-webhook] Payout ${failedPayout.id} reverted to pending after transfer failure`);
+        } else {
+          console.warn(`[paystack-webhook] No payout found for failed transfer_code: ${failedTransferCode}`);
+        }
+
+        result = { success: true, status: 'transfer_failure_processed' };
+        break;
+      }
       
       default:
         console.log(`Unhandled webhook event: ${event.event}`);

@@ -126,6 +126,25 @@ serve(async (req) => {
       );
     }
 
+    // Write audit log for payment initialization
+    await supabase.from('audit_logs').insert({
+      user_id: user.id,
+      user_email: user.email,
+      action: 'payment_initialized',
+      resource_type: 'transaction',
+      resource_id: reference,
+      details: {
+        groupId,
+        paymentType,
+        amount,
+        ...(slotNumber !== undefined ? { slotNumber } : {}),
+        ...(contributionId ? { contributionId } : {}),
+        ...(cycleNumber !== undefined ? { cycleNumber } : {}),
+      },
+    }).then(({ error }) => {
+      if (error) console.error('[initialize-payment] Audit log insert failed:', error);
+    });
+
     console.log('[initialize-payment] Pending transaction created', {
       reference,
       userId: user.id,
