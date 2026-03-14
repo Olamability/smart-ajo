@@ -438,3 +438,32 @@ export const getPaymentByReference = async (reference: string): Promise<Record<s
     throw error;
   }
 };
+
+export interface HealthCheckResult {
+  status: 'ok' | 'degraded';
+  timestamp: string;
+  db: 'ok' | 'error';
+  version: string;
+}
+
+/**
+ * Call the health-check edge function to verify the backend is reachable.
+ */
+export const checkBackendHealth = async (): Promise<HealthCheckResult> => {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase.functions.invoke('health-check', {
+      method: 'GET',
+    });
+
+    if (error) {
+      console.error('checkBackendHealth: Edge function error:', error);
+      return { status: 'degraded', timestamp: new Date().toISOString(), db: 'error', version: 'unknown' };
+    }
+
+    return data as HealthCheckResult;
+  } catch (error) {
+    console.error('checkBackendHealth: Unexpected error:', error);
+    return { status: 'degraded', timestamp: new Date().toISOString(), db: 'error', version: 'unknown' };
+  }
+};
