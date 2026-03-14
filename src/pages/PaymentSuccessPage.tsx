@@ -146,11 +146,11 @@ export default function PaymentSuccessPage() {
 
   const successDescription = isContribution
     ? 'Your contribution has been recorded'
-    : 'Your membership has been activated';
+    : 'Your security deposit and first contribution have been received';
 
   const successBody = isContribution
     ? 'Your contribution payment has been verified and recorded. Thank you for keeping up with your savings!'
-    : 'Your payment has been verified and your membership has been activated. You can now participate in group activities.';
+    : 'Your payment has been verified. Your security deposit and first contribution are recorded, and your membership is now active.';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">

@@ -113,6 +113,9 @@ serve(async (req) => {
       type: transactionType,
       status: 'pending',
       reference,
+      description: paymentType === 'group_join' || paymentType === 'group_creation'
+        ? 'Security Deposit + 1st Contribution + Service Fee'
+        : paymentType === 'contribution' ? `Contribution Cycle ${cycleNumber || ''}` : undefined,
       metadata: {
         userId: user.id,
         groupId,

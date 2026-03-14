@@ -19,6 +19,7 @@ interface ExtendedTransaction {
   payment_method: string;
   created_at: string;
   group_id?: string;
+  description?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -46,6 +47,7 @@ export default function TransactionsPage() {
           reference: tx.reference,
           created_at: tx.date,
           group_id: tx.groupId,
+          description: tx.description,
           payment_method: 'paystack',
           metadata: {},
         }));
@@ -65,7 +67,7 @@ export default function TransactionsPage() {
     if (!user) return;
 
     const filteredTransactions = filterTransactions();
-    
+
     if (filteredTransactions.length === 0) {
       toast.error('No transactions to export');
       return;
@@ -263,7 +265,7 @@ export default function TransactionsPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         <p className="font-medium truncate">
-                          {getTransactionLabel(transaction.type)}
+                          {transaction.description || getTransactionLabel(transaction.type)}
                         </p>
                         <Badge variant={getStatusColor(transaction.status)}>
                           {transaction.status}

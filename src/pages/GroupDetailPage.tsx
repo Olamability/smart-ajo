@@ -394,7 +394,7 @@ export default function GroupDetailPage() {
 
   // Helper function to check if creator needs to complete payment
   const shouldShowCreatorPaymentPrompt = () => {
-    return isCreator && !currentUserMember?.securityDepositPaid && group?.status === 'forming';
+    return isCreator && !currentUserMember?.securityDepositPaid;
   };
 
   // Helper function to determine if user has approved join request (for future use)
@@ -552,7 +552,7 @@ export default function GroupDetailPage() {
         )}
 
         {/* Status Alert - Show payment prompt for approved members who haven't paid */}
-        {currentUserMember && !currentUserMember.securityDepositPaid && !isCreator && group?.status === 'forming' && (
+        {currentUserMember && !currentUserMember.securityDepositPaid && !isCreator && (
           <Alert className="bg-green-50 border-green-200">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <AlertDescription>
@@ -1124,14 +1124,25 @@ export default function GroupDetailPage() {
                           <Badge variant={member.status === 'active' ? 'default' : 'outline'}>
                             {member.status}
                           </Badge>
-                          {member.securityDepositPaid ? (
-                            <div className="flex items-center gap-1 text-xs text-green-600">
-                              <CheckCircle className="w-3 h-3" />
-                              <span>Deposit Paid</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-orange-600">Deposit Pending</span>
-                          )}
+                          <div className="flex flex-col items-end gap-0.5 mt-1">
+                            {member.securityDepositPaid ? (
+                              <div className="flex items-center gap-1 text-[10px] text-green-600 font-medium">
+                                <CheckCircle className="w-3 h-3" />
+                                <span>Deposit Paid</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-orange-600">Deposit Pending</span>
+                            )}
+
+                            {member.totalContributions > 0 ? (
+                              <div className="flex items-center gap-1 text-[10px] text-green-600 font-medium">
+                                <CheckCircle className="w-3 h-3" />
+                                <span>1st Contribution Paid</span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-orange-600">1st Contribution Pending</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

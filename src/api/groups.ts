@@ -322,8 +322,8 @@ export const getGroupMembers = async (
       securityDepositPaid: member.has_paid_security_deposit,
       securityDepositAmount: member.security_deposit_amount,
       status: member.status,
-      totalContributions: 0, // Would need to query contributions table
-      totalPenalties: 0, // Would need to query penalties table
+      totalContributions: Number(member.total_contributions || 0),
+      totalPenalties: Number(member.total_penalties || 0),
       hasReceivedPayout: false, // Would need to query payouts table
     }));
 

@@ -28,7 +28,9 @@ RETURNS TABLE (
   joined_at TIMESTAMPTZ,
   full_name TEXT,
   email TEXT,
-  phone TEXT
+  phone TEXT,
+  total_contributions BIGINT,
+  total_penalties BIGINT
 ) AS $$
 BEGIN
   -- Check if the requesting user is a member of this group or is the group creator
@@ -58,7 +60,9 @@ BEGIN
     gm.joined_at,
     u.full_name,
     u.email,
-    u.phone
+    u.phone,
+    (SELECT COUNT(*) FROM contributions c WHERE c.group_id = p_group_id AND c.user_id = gm.user_id AND c.status = 'paid'),
+    (SELECT COUNT(*) FROM penalties p WHERE p.group_id = p_group_id AND p.user_id = gm.user_id AND p.status = 'applied')
   FROM group_members gm
   JOIN users u ON gm.user_id = u.id
   WHERE gm.group_id = p_group_id
