@@ -633,12 +633,11 @@ export const rejectJoinRequest = async (
       return { success: false, error: error.message };
     }
 
-    // The function returns a table with success and error_message columns
-    if (data && data.length > 0) {
-      const result = data[0];
-      if (!result.success) {
-        return { success: false, error: result.error_message };
-      }
+    // The function returns JSON object directly or in an array
+    const result = Array.isArray(data) ? data[0] : data;
+
+    if (result && !result.success) {
+      return { success: false, error: result.error || result.error_message || 'Failed to reject request' };
     }
 
     return { success: true };
