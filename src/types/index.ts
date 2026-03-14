@@ -265,6 +265,69 @@ export interface AdminAnalytics {
   users_with_kyc: number;
 }
 
+// ============================================================================
+// LEDGER SYSTEM TYPES  (double-entry accounting)
+// ============================================================================
+
+export type AccountType =
+  | 'user_wallet'
+  | 'ajo_pool'
+  | 'platform_fees'
+  | 'penalty_pool'
+  | 'paystack_gateway';
+
+export type LedgerEntryType = 'debit' | 'credit';
+
+export type LedgerTxStatus = 'pending' | 'posted' | 'voided';
+
+/** Named account in the chart of accounts. */
+export interface Account {
+  id: string;
+  name: string;
+  type: AccountType;
+  userId?: string;
+  walletId?: string;
+  groupId?: string;
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Groups one or more debit/credit entry pairs.
+ * Debits must equal credits before the transaction can be posted.
+ */
+export interface LedgerTransaction {
+  id: string;
+  /** Back-link to the high-level transactions table. */
+  transactionId?: string;
+  description: string;
+  status: LedgerTxStatus;
+  createdBy?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  postedAt?: string;
+}
+
+/** Single debit or credit against one account. */
+export interface LedgerEntry {
+  id: string;
+  ledgerTransactionId: string;
+  accountId: string;
+  entryType: LedgerEntryType;
+  amount: number;
+  currency: string;
+  createdAt: string;
+}
+
+/** Payload for a single entry inside post_ledger_transaction. */
+export interface LedgerEntryInput {
+  account_id: string;
+  entry_type: LedgerEntryType;
+  amount: number;
+  currency?: string;
+}
+
 export interface AuditLog {
   id: string;
   user_id: string | null;
