@@ -16,3 +16,4 @@ export * from './stats';
 export * from './profile';
 export * from './payments';
 export * from './wallets';
+export * from './audit';
