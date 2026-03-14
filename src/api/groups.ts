@@ -206,7 +206,7 @@ export const getUserGroups = async (): Promise<{
       security_deposit_amount: number;
       joined_at: string;
     }
-    let userMembershipMap = new Map<string, UserMembershipRow>();
+    const userMembershipMap = new Map<string, UserMembershipRow>();
     if (groupIds.length > 0) {
       const { data: memberships } = await supabase
         .from('group_members')

@@ -1,10 +1,11 @@
 /**
  * Error tracking and reporting utilities
- * 
+ *
  * This module provides centralized error tracking functionality.
- * Currently logs to console, but can be extended to integrate with
- * services like Sentry, LogRocket, or other error tracking platforms.
+ * Integrates with Sentry when VITE_SENTRY_DSN is configured.
  */
+
+import * as Sentry from '@sentry/react';
 
 /**
  * Context information for error reporting
@@ -20,13 +21,10 @@ export interface ErrorContext {
 
 /**
  * Sanitizes context data to remove sensitive information
- * 
- * @param context - Context object that may contain sensitive data
- * @returns Sanitized context object
  */
 function sanitizeContext(context: ErrorContext): ErrorContext {
   const sanitized = { ...context };
-  
+
   // Remove sensitive fields
   const sensitiveFields = ['password', 'token', 'secret', 'apiKey', 'api_key'];
   sensitiveFields.forEach(field => {
@@ -34,75 +32,39 @@ function sanitizeContext(context: ErrorContext): ErrorContext {
       delete sanitized[field];
     }
   });
-  
+
   // Mask email if present (show only domain)
   if (sanitized.email && typeof sanitized.email === 'string') {
     const [, domain] = sanitized.email.split('@');
     sanitized.email = `***@${domain || '***'}`;
   }
-  
+
   return sanitized;
 }
 
 /**
- * Reports an error with context information
- * 
- * In development: Logs to console
- * In production: Can be extended to send to error tracking service
- * 
- * @param error - The error that occurred
- * @param context - Additional context about the error
- * 
- * @example
- * ```typescript
- * try {
- *   await login(email, password);
- * } catch (error) {
- *   reportError(error, {
- *     operation: 'login',
- *     email: email,
- *     timestamp: new Date().toISOString(),
- *   });
- * }
- * ```
+ * Reports an error with context information.
+ * Sends to Sentry in production when DSN is configured.
  */
 export function reportError(error: unknown, context: ErrorContext = {}): void {
-  // Add timestamp if not provided
   const enrichedContext = {
     timestamp: new Date().toISOString(),
     ...context,
   };
 
-  // Sanitize context to remove sensitive data
   const sanitizedContext = sanitizeContext(enrichedContext);
 
-  // Log to console with structured data
   console.error('Error:', error);
   console.error('Context:', sanitizedContext);
 
-  // In production, you can integrate with error tracking services
-  // Uncomment and configure one of these when ready:
-  
-  // Sentry example:
-  // if (process.env.NODE_ENV === 'production' && typeof Sentry !== 'undefined') {
-  //   Sentry.captureException(error, {
-  //     extra: enrichedContext,
-  //   });
-  // }
-  
-  // LogRocket example:
-  // if (process.env.NODE_ENV === 'production' && typeof LogRocket !== 'undefined') {
-  //   LogRocket.captureException(error as Error, {
-  //     extra: enrichedContext,
-  //   });
-  // }
+  Sentry.withScope(scope => {
+    scope.setExtras(sanitizedContext);
+    Sentry.captureException(error);
+  });
 }
 
 /**
- * Reports a warning (non-critical issue)
- * 
- * @param message - Warning message
- * @param context - Additional context
+ * Reports a warning (non-critical issue).
  */
 export function reportWarning(message: string, context: ErrorContext = {}): void {
   const enrichedContext = {
@@ -115,20 +77,14 @@ export function reportWarning(message: string, context: ErrorContext = {}): void
   console.warn('Warning:', message);
   console.warn('Context:', sanitizedContext);
 
-  // In production, you can send warnings to your tracking service
-  // if (process.env.NODE_ENV === 'production' && typeof Sentry !== 'undefined') {
-  //   Sentry.captureMessage(message, {
-  //     level: 'warning',
-  //     extra: enrichedContext,
-  //   });
-  // }
+  Sentry.withScope(scope => {
+    scope.setExtras(sanitizedContext);
+    Sentry.captureMessage(message, 'warning');
+  });
 }
 
 /**
- * Reports an info-level event (for tracking important application events)
- * 
- * @param message - Info message
- * @param context - Additional context
+ * Reports an info-level event (for tracking important application events).
  */
 export function reportInfo(message: string, context: ErrorContext = {}): void {
   const enrichedContext = {
@@ -141,11 +97,8 @@ export function reportInfo(message: string, context: ErrorContext = {}): void {
   console.info('Info:', message);
   console.info('Context:', sanitizedContext);
 
-  // In production, you can send info events to your tracking service
-  // if (process.env.NODE_ENV === 'production' && typeof Sentry !== 'undefined') {
-  //   Sentry.captureMessage(message, {
-  //     level: 'info',
-  //     extra: sanitizedContext,
-  //   });
-  // }
+  Sentry.withScope(scope => {
+    scope.setExtras(sanitizedContext);
+    Sentry.captureMessage(message, 'info');
+  });
 }

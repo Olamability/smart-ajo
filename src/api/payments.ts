@@ -14,6 +14,7 @@
 import { createClient } from '@/lib/client/supabase';
 import { getErrorMessage } from '@/lib/utils';
 import { calculateBackoffDelay } from '@/lib/utils/auth';
+import { logAuditEvent, logApiError } from '@/api/audit';
 
 export interface PaymentInitializationResult {
   success: boolean;
@@ -89,9 +90,16 @@ export const initializeGroupCreationPayment = async (
     if (error || !data?.reference) {
       const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
       console.error('Error initializing group creation payment:', message);
+      await logApiError('initializeGroupCreationPayment', message, { groupId });
       return { success: false, error: message };
     }
 
+    await logAuditEvent({
+      action: 'payment_initiated',
+      resourceType: 'transaction',
+      resourceId: data.reference,
+      details: { groupId, amount, paymentType: 'group_creation', slotNumber },
+    });
     return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing group creation payment:', error);
@@ -122,9 +130,16 @@ export const initializeGroupJoinPayment = async (
     if (error || !data?.reference) {
       const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
       console.error('Error initializing group join payment:', message);
+      await logApiError('initializeGroupJoinPayment', message, { groupId });
       return { success: false, error: message };
     }
 
+    await logAuditEvent({
+      action: 'payment_initiated',
+      resourceType: 'transaction',
+      resourceId: data.reference,
+      details: { groupId, amount, paymentType: 'group_join', slotNumber },
+    });
     return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing group join payment:', error);
@@ -163,9 +178,16 @@ export const initializeAjoContributionPayment = async (params: {
     if (error || !data?.reference) {
       const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
       console.error('Error initializing Ajo contribution payment intent:', message);
+      await logApiError('initializeAjoContributionPayment', message, { groupId: ajoGroupId, contributionId });
       return { success: false, error: message };
     }
 
+    await logAuditEvent({
+      action: 'payment_initiated',
+      resourceType: 'transaction',
+      resourceId: data.reference,
+      details: { groupId: ajoGroupId, amountInKobo, paymentType: 'contribution', contributionId },
+    });
     return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing Ajo contribution payment:', error);
@@ -199,9 +221,16 @@ export const initializeContributionPayment = async (
     if (error || !data?.reference) {
       const message = data?.error ?? error?.message ?? 'Failed to initialize payment';
       console.error('Error initializing contribution payment:', message);
+      await logApiError('initializeContributionPayment', message, { groupId, contributionId });
       return { success: false, error: message };
     }
 
+    await logAuditEvent({
+      action: 'payment_initiated',
+      resourceType: 'transaction',
+      resourceId: data.reference,
+      details: { groupId, amount, paymentType: 'contribution', contributionId },
+    });
     return { success: true, reference: data.reference };
   } catch (error) {
     console.error('Error initializing contribution payment:', error);
@@ -253,9 +282,16 @@ export const verifyPaymentAndActivateMembership = async (
     }
 
     console.log('verifyPaymentAndActivateMembership: Payment verified successfully');
+    await logAuditEvent({
+      action: 'payment_verified',
+      resourceType: 'transaction',
+      resourceId: reference,
+      details: { verified: true },
+    });
     return { success: true, verified: true, data: data.data };
   } catch (error) {
     console.error('verifyPaymentAndActivateMembership: Error in payment verification:', error);
+    await logApiError('verifyPaymentAndActivateMembership', error, { reference });
     return { success: false, error: getErrorMessage(error, 'Payment verification failed') };
   }
 };
@@ -310,9 +346,16 @@ export const verifyPaymentAndRecordContribution = async (
     }
 
     console.log('verifyPaymentAndRecordContribution: Payment verified successfully');
+    await logAuditEvent({
+      action: 'contribution_paid',
+      resourceType: 'transaction',
+      resourceId: reference,
+      details: { verified: true },
+    });
     return { success: true, verified: true, data: data.data };
   } catch (error) {
     console.error('verifyPaymentAndRecordContribution: Error in payment verification:', error);
+    await logApiError('verifyPaymentAndRecordContribution', error, { reference });
     return { success: false, error: getErrorMessage(error, 'Payment verification failed') };
   }
 };
@@ -375,9 +418,16 @@ export const verifyContributionPayment = async (
     }
 
     console.log('verifyContributionPayment: Contribution payment verified successfully');
+    await logAuditEvent({
+      action: 'contribution_paid',
+      resourceType: 'transaction',
+      resourceId: reference,
+      details: { verified: true },
+    });
     return { success: true, verified: true, data: data.data };
   } catch (error) {
     console.error('verifyContributionPayment: Error in contribution payment verification:', error);
+    await logApiError('verifyContributionPayment', error, { reference });
     return { success: false, error: getErrorMessage(error, 'Contribution payment verification failed') };
   }
 };
