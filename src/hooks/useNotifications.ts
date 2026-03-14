@@ -120,6 +120,7 @@ export function useNotifications() {
         () => {
           // Refetch both lists when anything changes
           queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+          queryClient.invalidateQueries({ queryKey: UNREAD_COUNT_QUERY_KEY });
         }
       )
       .subscribe();

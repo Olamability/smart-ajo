@@ -85,8 +85,8 @@ export function useWallet() {
   const locked = wallet?.locked_balance ?? 0;
   const total = available + locked;
 
-  // Derive pending contributions from recent outbound wallet transactions
-  const pendingAmount = transactions
+  // Derive total recent inbound deposits
+  const recentDepositsAmount = transactions
     .filter((t) => t.transaction_type === 'deposit')
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -95,7 +95,7 @@ export function useWallet() {
     available,
     locked,
     total,
-    pendingAmount,
+    recentDepositsAmount,
     transactions,
     isLoading,
     error,

@@ -93,8 +93,7 @@ export function useContributions({
     return () => {
       supabase.removeChannel(channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, groupId]);
+  }, [user, groupId, queryClient]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const upcoming = contributions.filter((c) => c.status === 'pending');
   const paid = contributions.filter((c) => c.status === 'paid');
