@@ -57,6 +57,7 @@ import {
   Phone,
   User,
   CreditCard,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -91,6 +92,7 @@ export default function GroupDetailPage() {
   const [isCreator, setIsCreator] = useState(false);
   const [currentUserMember, setCurrentUserMember] = useState<GroupMember | null>(null);
   const [isJoining, setIsJoining] = useState(false);
+  const [isRefreshingSlots, setIsRefreshingSlots] = useState(false);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
@@ -412,6 +414,7 @@ export default function GroupDetailPage() {
         // Reload join requests and taken slots to reflect the reserved slot
         await loadJoinRequests();
         await loadTakenSlots();
+        await loadUserJoinRequestStatus();
       } else {
         toast.error(result.error || 'Failed to send join request');
       }
@@ -423,9 +426,13 @@ export default function GroupDetailPage() {
     }
   };
 
-  const openJoinDialog = () => {
+  const openJoinDialog = async () => {
     setShowJoinDialog(true);
     setSelectedSlot(null);
+    // Refresh taken slots and members to ensure latest occupancy data is shown
+    setIsRefreshingSlots(true);
+    await Promise.all([loadTakenSlots(), loadMembers()]);
+    setIsRefreshingSlots(false);
   };
 
   // Helper function to determine if user should see join button
@@ -457,6 +464,15 @@ export default function GroupDetailPage() {
     return (
       userJoinRequest &&
       userJoinRequest.status === 'pending' &&
+      !currentUserMember
+    );
+  };
+
+  // Helper function to determine if user has a rejected join request
+  const hasRejectedJoinRequest = () => {
+    return (
+      userJoinRequest &&
+      userJoinRequest.status === 'rejected' &&
       !currentUserMember
     );
   };
@@ -695,6 +711,35 @@ export default function GroupDetailPage() {
           </Alert>
         )}
 
+        {/* Status Alert - Show rejection notice with reapply option */}
+        {hasRejectedJoinRequest() && group?.status === 'forming' && (
+          <Alert className="bg-red-50 border-red-200">
+            <XCircle className="h-4 w-4 text-red-600" />
+            <AlertDescription>
+              <span className="text-red-900 font-semibold">
+                Your join request was declined
+              </span>
+              {userJoinRequest?.rejection_reason && (
+                <p className="text-sm text-red-700 mt-1">
+                  Reason: {userJoinRequest.rejection_reason as string}
+                </p>
+              )}
+              <p className="text-sm text-red-700 mt-1">
+                You can apply again — try selecting a different payout position.
+              </p>
+              <Button
+                onClick={openJoinDialog}
+                size="sm"
+                variant="outline"
+                className="mt-3 border-red-300 text-red-700 hover:bg-red-100"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                Apply Again
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Join Group Dialog with Slot Selection */}
         <Dialog open={showJoinDialog} onOpenChange={setShowJoinDialog}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full">
@@ -713,10 +758,16 @@ export default function GroupDetailPage() {
                   selectedSlot={selectedSlot}
                   onSlotSelect={setSelectedSlot}
                   availableSlots={availableSlotsData}
-                  disabled={isJoining}
+                  disabled={isJoining || isRefreshingSlots}
                   isCreator={false}
                   totalMembers={group.totalMembers}
                 />
+              )}
+              {isRefreshingSlots && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground mt-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Refreshing slot availability…
+                </p>
               )}
             </div>
 
@@ -730,7 +781,7 @@ export default function GroupDetailPage() {
               </Button>
               <Button
                 onClick={handleJoinGroup}
-                disabled={isJoining || !selectedSlot}
+                disabled={isJoining || isRefreshingSlots || !selectedSlot}
               >
                 {isJoining ? (
                   <>
