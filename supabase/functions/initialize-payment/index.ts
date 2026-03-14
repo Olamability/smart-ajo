@@ -79,6 +79,25 @@ serve(async (req) => {
       );
     }
 
+    // Rate limit: max 10 payment initialisations per user per 60 seconds
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: rateLimitOk, error: rlError } = await adminClient.rpc('check_rate_limit', {
+      p_identifier: `user:${user.id}`,
+      p_action: 'payment_init',
+      p_max_requests: 10,
+      p_window_secs: 60,
+    });
+
+    if (rlError) {
+      console.warn('[initialize-payment] Rate limit check failed (non-blocking):', rlError.message);
+    } else if (rateLimitOk === false) {
+      console.warn('[initialize-payment] Rate limit exceeded for user:', user.id);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Too many requests. Please wait before trying again.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
+      );
+    }
+
     const body = await req.json();
     const { groupId, amount, paymentType, slotNumber, contributionId, cycleNumber } = body as {
       groupId: string;
@@ -104,7 +123,7 @@ serve(async (req) => {
       paymentType === 'contribution' ? 'contribution' : 'security_deposit';
 
     // Use service role client to insert the transaction (bypasses RLS).
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = adminClient;
 
     const { error: insertError } = await supabase.from('transactions').insert({
       user_id: user.id,

@@ -1,0 +1,57 @@
+name: Database Backup
+
+on:
+  schedule:
+    # Run daily at 01:00 UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Backup Supabase Database
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    steps:
+      - name: Install Supabase CLI
+        run: |
+          curl -Lo supabase.deb \
+            https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.deb
+          sudo dpkg -i supabase.deb
+
+      - name: Trigger database backup via Supabase Management API
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/backups" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json")
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          echo "Status: $HTTP_STATUS"
+          echo "Response: $BODY"
+          if [ "$HTTP_STATUS" -ge 400 ]; then
+            echo "::warning::Backup API returned $HTTP_STATUS – verify project plan supports PITR."
+          else
+            echo "Backup triggered successfully."
+          fi
+
+      - name: Verify health after backup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "${SUPABASE_URL}/functions/v1/health-check" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          echo "Health-check status: $HTTP_STATUS"
+          echo "Health-check response: $BODY"
+          if [ "$HTTP_STATUS" -ge 400 ]; then
+            echo "::error::Health check failed after backup with status $HTTP_STATUS"
+            exit 1
+          fi
