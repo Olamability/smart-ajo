@@ -100,11 +100,11 @@ export default function GroupDetailPage() {
   // Calculate available slots based on current members and join requests
   const availableSlotsData: Slot[] = [
     ...members
-      .filter(m => m.position)
+      .filter(m => m.rotationPosition)
       .map(m => ({
-        position: m.position as number,
+        position: m.rotationPosition as number,
         isAvailable: false,
-        userName: m.fullName || m.email
+        userName: m.userName
       })),
     ...joinRequests
       .filter(r => r.preferred_slot)
