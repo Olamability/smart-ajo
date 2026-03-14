@@ -135,20 +135,21 @@ async function processPaymentSuccess(
 
   // Handle different payment types
   if (paymentType === 'group_creation' || paymentType === 'group_join') {
-    // Add or update user as group member with selected slot
+    // Add or update user as group member with selected slot.
+    // `position` is the correct column name in group_members.
     const { error: memberError } = await supabase
       .from('group_members')
       .upsert(
         {
           group_id: groupId,
           user_id: userId,
-          rotation_position: slotNumber,
+          position: slotNumber,
           status: 'active',
-          payment_status: 'paid',
           has_paid_security_deposit: true,
+          security_deposit_paid_at: new Date().toISOString(),
         },
         {
-          onConflict: 'group_id,user_id',
+          onConflict: 'user_id,group_id',
           ignoreDuplicates: false,
         }
       );
@@ -182,8 +183,20 @@ async function processPaymentSuccess(
           payment_completed_at: new Date().toISOString(),
         })
         .eq('user_id', userId)
-        .eq('group_id', groupId);
+        .eq('group_id', groupId)
+        .eq('status', 'approved'); // Only update approved requests
     }
+
+    // Notify the user their payment was successful
+    await supabase.rpc('send_payment_notification', {
+      p_user_id: userId,
+      p_type: 'payment_received',
+      p_title: paymentType === 'group_creation' ? 'Group created!' : 'You joined the group!',
+      p_message: paymentType === 'group_creation'
+        ? 'Your security deposit was received and your group is now forming.'
+        : 'Your security deposit was received. Welcome to the group!',
+      p_metadata: { groupId, paymentType, reference },
+    });
   } else if (paymentType === 'contribution') {
     // Update existing contribution record to mark as paid
     const contributionId = metadata?.contributionId;
@@ -222,8 +235,8 @@ async function processPaymentSuccess(
       return { success: false, error: 'Failed to update group balance' };
     }
 
-    // Check if all members have contributed for this cycle
-    // First get the contribution to find group and cycle info
+    // Check if all members have contributed for this cycle and prepare payout
+    // Delegate to the check_cycle_and_prepare_payout RPC for atomic logic
     const { data: contributionData } = await supabase
       .from('contributions')
       .select('group_id, cycle_number')
@@ -231,35 +244,41 @@ async function processPaymentSuccess(
       .single();
 
     if (contributionData) {
-      // Count total paid contributions for this cycle
-      const { data: contributionsData } = await supabase
-        .from('contributions')
-        .select('id')
-        .eq('group_id', contributionData.group_id)
-        .eq('cycle_number', contributionData.cycle_number)
-        .eq('status', 'paid');
+      const cycleNumber = contributionData.cycle_number;
+      const cycleGroupId = contributionData.group_id;
+      console.log(`[paystack-webhook] Checking cycle ${cycleNumber} readiness for group ${cycleGroupId}`);
 
-      // Get total members in the group
-      const { data: groupData } = await supabase
-        .from('groups')
-        .select('total_members')
-        .eq('id', contributionData.group_id)
-        .single();
+      const { data: cycleResult, error: cycleError } = await supabase.rpc(
+        'check_cycle_and_prepare_payout',
+        { p_group_id: cycleGroupId, p_cycle_number: cycleNumber }
+      );
 
-      const totalContributions = contributionsData?.length || 0;
-      const requiredContributions = groupData?.total_members || 0;
+      if (cycleError) {
+        console.error('[paystack-webhook] Error checking cycle readiness:', cycleError);
+      } else if (cycleResult?.cycle_complete) {
+        console.log(`[paystack-webhook] Cycle ${cycleNumber} complete – payout prepared`, cycleResult);
 
-      // If all members have paid for this cycle, trigger payout processing
-      // (Future implementation: Create payout record, initiate transfer, etc.)
-      if (totalContributions >= requiredContributions) {
-        console.log(`Cycle ${contributionData.cycle_number} complete for group ${contributionData.group_id} - ${totalContributions}/${requiredContributions} paid`);
-        // TODO: Implement payout logic here
-        // 1. Calculate payout amount
-        // 2. Identify recipient (based on rotation_position)
-        // 3. Create payout record
-        // 4. Initiate transfer via Paystack Transfer API
+        // Notify all group members that the payout cycle is ready
+        if (cycleResult.payout_created && cycleResult.recipient_id) {
+          await supabase.rpc('send_payout_ready_notifications', {
+            p_group_id: cycleGroupId,
+            p_cycle_number: cycleNumber,
+            p_recipient_id: cycleResult.recipient_id,
+          });
+        }
+      } else {
+        console.log(`[paystack-webhook] Cycle ${cycleNumber} not yet complete`, cycleResult);
       }
     }
+
+    // Notify the contributor their payment was received
+    await supabase.rpc('send_payment_notification', {
+      p_user_id: userId,
+      p_type: 'payment_received',
+      p_title: 'Contribution received',
+      p_message: `Your contribution of ₦${contributionAmountNaira.toLocaleString()} has been received.`,
+      p_metadata: { groupId, contributionId, reference },
+    });
   }
 
   return { success: true, reference, status: 'processed' };
@@ -320,7 +339,7 @@ serve(async (req) => {
         result = await processPaymentSuccess(supabase, event.data);
         break;
       
-      case 'charge.failed':
+      case 'charge.failed': {
         // Update transaction status to failed
         await supabase
           .from('transactions')
@@ -333,9 +352,25 @@ serve(async (req) => {
             },
           })
           .eq('reference', event.data.reference);
-        
+
+        // Notify the user of the payment failure (best-effort)
+        const failedUserId = event.data.metadata?.userId;
+        if (failedUserId) {
+          await supabase.rpc('send_payment_notification', {
+            p_user_id: failedUserId,
+            p_type: 'payment_failed',
+            p_title: 'Payment failed',
+            p_message: 'Your payment could not be processed. Please try again.',
+            p_metadata: {
+              reference: event.data.reference,
+              reason: event.data.gateway_response,
+            },
+          });
+        }
+
         result = { success: true, status: 'failed_payment_recorded' };
         break;
+      }
       
       case 'transfer.success':
       case 'transfer.failed':

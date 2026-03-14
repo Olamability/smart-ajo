@@ -213,21 +213,22 @@ serve(async (req) => {
     if (paymentType === 'group_creation' || paymentType === 'group_join') {
       console.log(`Processing ${paymentType} payment for slot ${slotNumber}`);
       
-      // Add or update user as group member with selected slot
-      // Use upsert to handle both new members (group_creation) and existing pending members (group_join)
+      // Add or update user as group member with selected slot.
+      // `position` is the column name in group_members (rotation_position is an alias used
+      // in some older code). `has_paid_security_deposit` tracks payment status.
       const { error: memberError } = await supabase
         .from('group_members')
         .upsert(
           {
             group_id: groupId,
             user_id: userId,
-            rotation_position: slotNumber,
+            position: slotNumber,
             status: 'active',
-            payment_status: 'paid',
             has_paid_security_deposit: true,
+            security_deposit_paid_at: new Date().toISOString(),
           },
           {
-            onConflict: 'group_id,user_id',
+            onConflict: 'user_id,group_id',
             ignoreDuplicates: false, // Update existing record instead of ignoring
           }
         );
@@ -281,7 +282,8 @@ serve(async (req) => {
             payment_completed_at: new Date().toISOString(),
           })
           .eq('user_id', userId)
-          .eq('group_id', groupId);
+          .eq('group_id', groupId)
+          .eq('status', 'approved'); // Only update approved requests
 
         if (requestUpdateError) {
           console.error('Error updating join request:', JSON.stringify(requestUpdateError));
@@ -289,6 +291,17 @@ serve(async (req) => {
           console.log('Join request updated successfully');
         }
       }
+
+      // Notify the user their payment was successful
+      await supabase.rpc('send_payment_notification', {
+        p_user_id: userId,
+        p_type: 'payment_received',
+        p_title: paymentType === 'group_creation' ? 'Group created!' : 'You joined the group!',
+        p_message: paymentType === 'group_creation'
+          ? 'Your security deposit was received and your group is now forming.'
+          : 'Your security deposit was received. Welcome to the group!',
+        p_metadata: { groupId, paymentType, reference: paymentData.reference },
+      });
     }
 
     // Return success response

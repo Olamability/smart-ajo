@@ -279,6 +279,49 @@ serve(async (req) => {
       amount: contributionAmountNaira,
     });
 
+    // Step 3d: Check if all cycle contributions are paid and prepare payout
+    const { data: contributionData } = await supabase
+      .from('contributions')
+      .select('cycle_number')
+      .eq('id', contributionId)
+      .single();
+
+    if (contributionData) {
+      const cycleNumber = contributionData.cycle_number;
+      console.log(`[verify-contribution] Checking cycle ${cycleNumber} readiness for group ${groupId}`);
+
+      const { data: cycleResult, error: cycleError } = await supabase.rpc(
+        'check_cycle_and_prepare_payout',
+        { p_group_id: groupId, p_cycle_number: cycleNumber }
+      );
+
+      if (cycleError) {
+        console.error('[verify-contribution] Error checking cycle readiness:', cycleError);
+      } else if (cycleResult?.cycle_complete) {
+        console.log(`[verify-contribution] Cycle ${cycleNumber} complete – payout prepared`, cycleResult);
+
+        // Notify all group members that the payout cycle is ready
+        if (cycleResult.payout_created && cycleResult.recipient_id) {
+          await supabase.rpc('send_payout_ready_notifications', {
+            p_group_id: groupId,
+            p_cycle_number: cycleNumber,
+            p_recipient_id: cycleResult.recipient_id,
+          });
+        }
+      } else {
+        console.log(`[verify-contribution] Cycle ${cycleNumber} not yet complete`, cycleResult);
+      }
+    }
+
+    // Step 3e: Notify the user that their contribution payment was received
+    await supabase.rpc('send_payment_notification', {
+      p_user_id: userId,
+      p_type: 'payment_received',
+      p_title: 'Contribution received',
+      p_message: `Your contribution of ₦${contributionAmountNaira.toLocaleString()} has been received.`,
+      p_metadata: { groupId, contributionId, reference: paymentData.reference },
+    });
+
     // Return success response
     console.log('Contribution payment verification completed successfully');
     return new Response(
