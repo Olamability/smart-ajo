@@ -9,7 +9,9 @@ import {
   approveJoinRequest,
   rejectJoinRequest,
   getUserJoinRequestStatus,
+  getTakenSlots,
 } from '@/api';
+import { createClient } from '@/lib/client/supabase';
 import type { Group, GroupMember } from '@/types';
 import { usePayment } from '@/hooks/usePayment';
 import ContributionsList from '@/components/ContributionsList';
@@ -97,23 +99,29 @@ export default function GroupDetailPage() {
   // State for join request status tracking
   const [userJoinRequest, setUserJoinRequest] = useState<Record<string, unknown> | null>(null);
 
-  // Calculate available slots based on current members and join requests
-  const availableSlotsData: Slot[] = [
-    ...members
-      .filter(m => m.rotationPosition)
-      .map(m => ({
-        position: m.rotationPosition as number,
-        isAvailable: false,
-        userName: m.userName
-      })),
-    ...joinRequests
-      .filter(r => r.preferred_slot)
-      .map(r => ({
-        position: r.preferred_slot as number,
-        isAvailable: false,
-        userName: r.user_name
-      }))
-  ];
+  // Slot numbers taken by members or pending join requests (accessible to all users)
+  const [takenSlotNumbers, setTakenSlotNumbers] = useState<number[]>([]);
+
+  // Calculate available slots based on current members, join requests, and server-fetched taken slots
+  // takenSlotNumbers covers slots visible to all users (including non-creator users)
+  const allTakenPositions = new Set<number>([
+    ...members.filter(m => m.rotationPosition).map(m => m.rotationPosition as number),
+    ...joinRequests.filter(r => r.preferred_slot).map(r => r.preferred_slot as number),
+    ...takenSlotNumbers,
+  ]);
+
+  const memberSlotMap = new Map<number, string>(
+    members.filter(m => m.rotationPosition).map(m => [m.rotationPosition as number, m.userName])
+  );
+  const requestSlotMap = new Map<number, string>(
+    joinRequests.filter(r => r.preferred_slot).map(r => [r.preferred_slot as number, r.user_name])
+  );
+
+  const availableSlotsData: Slot[] = Array.from(allTakenPositions).map(pos => ({
+    position: pos,
+    isAvailable: false,
+    userName: memberSlotMap.get(pos) || requestSlotMap.get(pos),
+  }));
 
   // Initial load effect
   useEffect(() => {
@@ -122,6 +130,7 @@ export default function GroupDetailPage() {
       loadMembers();
       loadJoinRequests();
       loadUserJoinRequestStatus();
+      loadTakenSlots();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -140,6 +149,7 @@ export default function GroupDetailPage() {
       loadMembers();
       loadJoinRequests();
       loadUserJoinRequestStatus();
+      loadTakenSlots();
 
       // Remove the reload parameter from URL to avoid reloading on every render
       navigate(`/groups/${id}`, { replace: true });
@@ -215,6 +225,19 @@ export default function GroupDetailPage() {
     }
   };
 
+  const loadTakenSlots = async () => {
+    if (!id) return;
+
+    try {
+      const result = await getTakenSlots(id);
+      if (result.success && result.takenSlots) {
+        setTakenSlotNumbers(result.takenSlots);
+      }
+    } catch (error) {
+      console.error('Error loading taken slots:', error);
+    }
+  };
+
   const handleApproveRequest = async (requestId: string, preferredSlot: number) => {
     setProcessingRequestId(requestId);
     try {
@@ -225,6 +248,7 @@ export default function GroupDetailPage() {
         await loadJoinRequests();
         await loadMembers();
         await loadGroupDetails();
+        await loadTakenSlots();
       } else {
         toast.error(result.error || 'Failed to approve request');
       }
@@ -238,12 +262,33 @@ export default function GroupDetailPage() {
 
   const handleRejectRequest = async (requestId: string) => {
     setProcessingRequestId(requestId);
+    // Find the request so we can notify the requesting user after rejection
+    const rejectedRequest = joinRequests.find(r => r.id === requestId);
     try {
       const result = await rejectJoinRequest(requestId, 'Request rejected by group admin');
       if (result.success) {
         toast.success('Join request rejected');
-        // Reload join requests
+
+        // Send a notification to the requesting user so they know their request was declined
+        if (rejectedRequest && group) {
+          try {
+            const supabase = createClient();
+            await supabase.from('notifications').insert({
+              user_id: rejectedRequest.user_id,
+              type: 'system_announcement',
+              title: 'Join Request Declined',
+              message: `Your request to join "${group.name}" has been declined. You may request to join another group.`,
+              related_group_id: id,
+            });
+          } catch (notifError) {
+            // Notification failure should not block the rejection flow
+            console.error('Error sending rejection notification:', notifError);
+          }
+        }
+
+        // Reload join requests and taken slots
         await loadJoinRequests();
+        await loadTakenSlots();
       } else {
         toast.error(result.error || 'Failed to reject request');
       }
@@ -364,8 +409,9 @@ export default function GroupDetailPage() {
         toast.success('Join request sent! Please wait for group admin approval.');
         setShowJoinDialog(false);
         setSelectedSlot(null);
-        // Reload join requests to show the new request status
+        // Reload join requests and taken slots to reflect the reserved slot
         await loadJoinRequests();
+        await loadTakenSlots();
       } else {
         toast.error(result.error || 'Failed to send join request');
       }
