@@ -5,6 +5,7 @@ import type { UserStats } from '@/api/stats';
 import type { Group, Transaction } from '@/types';
 import NotificationCenter from '@/components/NotificationCenter';
 import AvailableGroupsSection from '@/components/AvailableGroupsSection';
+import WalletCard from '@/components/WalletCard';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -372,6 +373,11 @@ export default function DashboardPage() {
                   )}
                 </CardContent>
               </Card>
+            </div>
+
+            {/* Wallet Section */}
+            <div className="mt-6">
+              <WalletCard />
             </div>
 
             {/* Available Groups Section */}

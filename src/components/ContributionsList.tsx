@@ -1,14 +1,16 @@
 /**
  * Contributions Component
- * 
- * Displays contribution schedule and allows users to make payments
+ *
+ * Displays contribution cycles (upcoming, paid, overdue) and lets users
+ * pay via Paystack.  Backed by useContributions which uses React Query
+ * and a Supabase real-time subscription so the list refreshes
+ * automatically after a payment is verified.
  */
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { getGroupContributions } from '@/api';
+import { useContributions } from '@/hooks/useContributions';
 import type { Contribution } from '@/types';
 import { usePayment } from '@/hooks/usePayment';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -19,8 +21,8 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DollarSign, Calendar, Loader2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
-import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { useState } from 'react';
 
 interface ContributionsListProps {
   groupId: string;
@@ -33,34 +35,9 @@ export default function ContributionsList({
 }: ContributionsListProps) {
   const { user } = useAuth();
   const { initiatePayment, isProcessing } = usePayment();
-  const [contributions, setContributions] = useState<Contribution[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { contributions, isLoading: loading } = useContributions({ groupId });
   // Track which contribution is being paid so only its button shows loading
   const [payingContributionId, setPayingContributionId] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadContributions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupId]);
-
-  const loadContributions = async () => {
-    setLoading(true);
-    try {
-      const result = await getGroupContributions(groupId);
-      if (result.success && result.contributions) {
-        // Filter for current user's contributions
-        const userContributions = result.contributions.filter(
-          (c) => c.userId === user?.id
-        );
-        setContributions(userContributions);
-      }
-    } catch (error) {
-      console.error('Error loading contributions:', error);
-      toast.error('Failed to load contributions');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handlePayContribution = async (contribution: Contribution) => {
     if (!user || isProcessing) return;

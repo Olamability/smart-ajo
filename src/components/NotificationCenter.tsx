@@ -1,16 +1,13 @@
 /**
  * Notification Center Component
- * 
- * Displays user notifications with read/unread status
+ *
+ * Displays user notifications with read/unread status.
+ * Uses the useNotifications hook which is backed by React Query + a
+ * Supabase real-time channel, so the list updates automatically when
+ * new notifications arrive or existing ones change.
  */
 
-import { useState, useEffect } from 'react';
-import {
-  getUserNotifications,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  getUnreadNotificationsCount,
-} from '@/api';
+import { useNotifications } from '@/hooks/useNotifications';
 import type { Notification } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,79 +19,27 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Bell, Loader2, CheckCheck } from 'lucide-react';
-import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useNavigate } from 'react-router-dom';
 
 export default function NotificationCenter() {
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const {
+    notifications,
+    unreadCount,
+    isLoading: loading,
+    markAsRead,
+    markAllAsRead,
+    isMarkingAllRead,
+  } = useNotifications();
 
-  useEffect(() => {
-    loadNotifications();
-    loadUnreadCount();
-  }, []);
-
-  const loadNotifications = async () => {
-    setLoading(true);
-    try {
-      const result = await getUserNotifications();
-      if (result.success && result.notifications) {
-        setNotifications(result.notifications);
-      }
-    } catch (error) {
-      console.error('Error loading notifications:', error);
-      toast.error('Failed to load notifications');
-    } finally {
-      setLoading(false);
-    }
+  const handleMarkAsRead = (notificationId: string) => {
+    markAsRead(notificationId);
   };
 
-  const loadUnreadCount = async () => {
-    try {
-      const result = await getUnreadNotificationsCount();
-      if (result.success && result.count !== undefined) {
-        setUnreadCount(result.count);
-      }
-    } catch (error) {
-      console.error('Error loading unread count:', error);
-    }
-  };
-
-  const handleMarkAsRead = async (notificationId: string) => {
-    const result = await markNotificationAsRead(notificationId);
-    if (result.success) {
-      setNotifications((prev) =>
-        prev.map((n) =>
-          n.id === notificationId
-            ? { ...n, isRead: true, readAt: new Date().toISOString() }
-            : n
-        )
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-    } else {
-      toast.error('Failed to mark notification as read');
-    }
-  };
-
-  const handleMarkAllAsRead = async () => {
-    const result = await markAllNotificationsAsRead();
-    if (result.success) {
-      setNotifications((prev) =>
-        prev.map((n) => ({
-          ...n,
-          isRead: true,
-          readAt: new Date().toISOString(),
-        }))
-      );
-      setUnreadCount(0);
-      toast.success('All notifications marked as read');
-    } else {
-      toast.error('Failed to mark all notifications as read');
-    }
+  const handleMarkAllAsRead = () => {
+    markAllAsRead();
   };
 
   const handleNotificationClick = (notification: Notification) => {
@@ -154,9 +99,14 @@ export default function NotificationCenter() {
               variant="outline"
               size="sm"
               onClick={handleMarkAllAsRead}
+              disabled={isMarkingAllRead}
               className="gap-2"
             >
-              <CheckCheck className="w-4 h-4" />
+              {isMarkingAllRead ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCheck className="w-4 h-4" />
+              )}
               Mark all as read
             </Button>
           )}
