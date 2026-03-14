@@ -55,6 +55,9 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization') ?? '';
     const token = authHeader.replace('Bearer ', '');
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: { Authorization: authHeader },
+      },
       auth: {
         autoRefreshToken: false,
         detectSessionFromUrl: false,
@@ -65,7 +68,7 @@ serve(async (req) => {
     const {
       data: { user },
       error: authError,
-    } = await userClient.auth.getUser(token);
+    } = await userClient.auth.getUser();
 
     if (authError || !user) {
       console.error('[initialize-payment] Auth error:', authError);

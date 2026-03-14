@@ -25,7 +25,8 @@ export interface PaystackPopupConfig {
   currency?: string;
   metadata?: Record<string, unknown>;
   callback_url?: string;
-  onSuccess: (response: PaystackSuccessResponse) => void;
+  callback?: (response: PaystackSuccessResponse) => void;
+  onSuccess?: (response: PaystackSuccessResponse) => void;
   onCancel?: () => void;
   onClose?: () => void;
 }
@@ -127,7 +128,7 @@ class PaystackService {
       ref: config.reference,
       currency: 'NGN',
       metadata: config.metadata as unknown as Record<string, unknown>,
-      onSuccess: (response: PaystackSuccessResponse) => {
+      callback: (response: PaystackSuccessResponse) => {
         console.log('[PaystackService] Payment successful', {
           reference: response.reference,
           status: response.status,
