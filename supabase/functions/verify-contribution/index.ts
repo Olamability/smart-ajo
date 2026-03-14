@@ -90,7 +90,7 @@ serve(async (req) => {
       console.error('Payment reference not provided');
       return new Response(
         JSON.stringify({ success: false, error: 'Payment reference is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -118,7 +118,7 @@ serve(async (req) => {
           error: 'Payment verification failed with Paystack',
           details: errorData,
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -134,7 +134,7 @@ serve(async (req) => {
           error: 'Payment was not successful',
           paymentStatus: verificationData.data.status,
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -149,7 +149,7 @@ serve(async (req) => {
       console.error(`Invalid payment type for verify-contribution: ${metadata.paymentType}`);
       return new Response(
         JSON.stringify({ success: false, error: 'This endpoint only handles contribution payments' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -157,7 +157,7 @@ serve(async (req) => {
       console.error('Invalid payment metadata — missing userId or groupId');
       return new Response(
         JSON.stringify({ success: false, error: 'Invalid payment metadata' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -165,7 +165,7 @@ serve(async (req) => {
       console.error('Contribution ID missing in metadata');
       return new Response(
         JSON.stringify({ success: false, error: 'Contribution ID is required for contribution payment' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -217,7 +217,7 @@ serve(async (req) => {
       console.error('Error updating transaction record:', JSON.stringify(transactionUpdateError));
       return new Response(
         JSON.stringify({ success: false, error: 'Failed to update transaction record' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -245,7 +245,7 @@ serve(async (req) => {
       console.error('Error updating contribution:', JSON.stringify(contributionError));
       return new Response(
         JSON.stringify({ success: false, error: 'Failed to mark contribution as paid' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -269,7 +269,7 @@ serve(async (req) => {
       console.error('Error updating group balance via RPC:', JSON.stringify(balanceUpdateError));
       return new Response(
         JSON.stringify({ success: false, error: 'Failed to update group balance' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -367,7 +367,7 @@ serve(async (req) => {
         error: error instanceof Error ? error.message : 'Unknown error occurred',
       }),
       {
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );

@@ -61,7 +61,7 @@ serve(async (req) => {
 
   try {
     console.log('Payment verification request received');
-    
+
     // Get Paystack secret key from environment
     const paystackSecretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!paystackSecretKey) {
@@ -83,7 +83,7 @@ serve(async (req) => {
       console.error('Payment reference not provided');
       return new Response(
         JSON.stringify({ success: false, error: 'Payment reference is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -105,12 +105,12 @@ serve(async (req) => {
       const errorData = await paystackResponse.json();
       console.error('Paystack verification failed:', JSON.stringify(errorData));
       return new Response(
-        JSON.stringify({ 
-          success: false, 
+        JSON.stringify({
+          success: false,
           error: 'Payment verification failed with Paystack',
-          details: errorData 
+          details: errorData
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -121,12 +121,12 @@ serve(async (req) => {
     if (!verificationData.status || verificationData.data.status !== 'success') {
       console.error(`Payment not successful - status: ${verificationData.data.status}`);
       return new Response(
-        JSON.stringify({ 
-          success: false, 
+        JSON.stringify({
+          success: false,
           error: 'Payment was not successful',
-          paymentStatus: verificationData.data.status 
+          paymentStatus: verificationData.data.status
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -170,7 +170,7 @@ serve(async (req) => {
           success: false,
           error: 'Contribution payments must be verified via the verify-contribution endpoint',
         }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -178,7 +178,7 @@ serve(async (req) => {
       console.error('Invalid payment metadata - missing userId or groupId');
       return new Response(
         JSON.stringify({ success: false, error: 'Invalid payment metadata' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -203,7 +203,7 @@ serve(async (req) => {
       console.error('Error updating transaction record:', JSON.stringify(transactionUpdateError));
       return new Response(
         JSON.stringify({ success: false, error: 'Failed to update transaction record' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -212,7 +212,7 @@ serve(async (req) => {
     // Handle different payment types
     if (paymentType === 'group_creation' || paymentType === 'group_join') {
       console.log(`Processing ${paymentType} payment for slot ${slotNumber}`);
-      
+
       // Add or update user as group member with selected slot.
       // `position` is the column name in group_members (rotation_position is an alias used
       // in some older code). `has_paid_security_deposit` tracks payment status.
@@ -237,7 +237,7 @@ serve(async (req) => {
         console.error('Error adding/updating group member:', JSON.stringify(memberError));
         return new Response(
           JSON.stringify({ success: false, error: 'Failed to activate membership' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
@@ -277,7 +277,7 @@ serve(async (req) => {
         console.log('Updating join request status to paid');
         const { error: requestUpdateError } = await supabase
           .from('group_join_requests')
-          .update({ 
+          .update({
             status: 'paid',
             payment_completed_at: new Date().toISOString(),
           })
@@ -350,7 +350,7 @@ serve(async (req) => {
         error: error instanceof Error ? error.message : 'Unknown error occurred',
       }),
       {
-        status: 500,
+        status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );

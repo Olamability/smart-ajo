@@ -55,9 +55,6 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization') ?? '';
     const token = authHeader.replace('Bearer ', '');
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: { Authorization: authHeader },
-      },
       auth: {
         autoRefreshToken: false,
         detectSessionFromUrl: false,
@@ -68,12 +65,16 @@ serve(async (req) => {
     const {
       data: { user },
       error: authError,
-    } = await userClient.auth.getUser();
+    } = await userClient.auth.getUser(token);
 
     if (authError || !user) {
       console.error('[initialize-payment] Auth error:', authError);
       return new Response(
-        JSON.stringify({ success: false, error: 'Unauthorized' }),
+        JSON.stringify({
+          success: false,
+          error: 'Unauthorized',
+          details: authError?.message ?? 'User not found'
+        }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
