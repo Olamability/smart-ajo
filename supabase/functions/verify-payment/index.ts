@@ -264,7 +264,7 @@ serve(async (req) => {
       // - The trigger ensures current_members is accurately maintained
       const { data: groupData } = await supabase
         .from('groups')
-        .select('total_members, current_members')
+        .select('total_members, current_members, total_cycles, frequency, start_date, contribution_amount, service_fee_percentage')
         .eq('id', groupId)
         .single();
 
@@ -281,6 +281,86 @@ serve(async (req) => {
           // Don't fail the request, group status update is non-critical for payment verification
         } else {
           console.log('Group status updated to active');
+
+          // Generate pending contribution records for cycles 2..totalCycles for all members
+          // Cycle 1 was already recorded as paid when each member joined
+          try {
+            const { data: allMembers, error: membersError } = await supabase
+              .from('group_members')
+              .select('user_id')
+              .eq('group_id', groupId)
+              .eq('status', 'active');
+
+            if (membersError) {
+              console.error('[verify-payment] Failed to fetch members for contribution generation:', JSON.stringify(membersError));
+            } else if (allMembers && allMembers.length > 0) {
+              const totalCycles: number = groupData.total_cycles ?? groupData.total_members;
+              const contributionAmount: number = groupData.contribution_amount;
+              const serviceFeePercentage: number = groupData.service_fee_percentage ?? 2;
+              const serviceFee: number = Math.round((contributionAmount * serviceFeePercentage / 100) * 100) / 100;
+              const frequency: string = groupData.frequency ?? 'monthly';
+
+              // Calculate the base date (start_date of the group or today)
+              const baseDate = groupData.start_date ? new Date(groupData.start_date) : new Date();
+
+              const pendingContribs: Record<string, unknown>[] = [];
+              for (let cycle = 2; cycle <= totalCycles; cycle++) {
+                // Calculate due date for this cycle
+                const dueDate = new Date(baseDate);
+                if (frequency === 'daily') {
+                  dueDate.setDate(dueDate.getDate() + (cycle - 1));
+                } else if (frequency === 'weekly') {
+                  dueDate.setDate(dueDate.getDate() + (cycle - 1) * 7);
+                } else {
+                  // monthly
+                  dueDate.setMonth(dueDate.getMonth() + (cycle - 1));
+                }
+                const dueDateStr = dueDate.toISOString().split('T')[0];
+
+                for (const member of allMembers) {
+                  pendingContribs.push({
+                    group_id: groupId,
+                    user_id: member.user_id,
+                    amount: contributionAmount,
+                    cycle_number: cycle,
+                    status: 'pending',
+                    due_date: dueDateStr,
+                    service_fee: serviceFee,
+                    is_overdue: false,
+                  });
+                }
+              }
+
+              if (pendingContribs.length > 0) {
+                // Use upsert with ignoreDuplicates so re-runs are idempotent
+                const { error: pendingContribError } = await supabase
+                  .from('contributions')
+                  .upsert(pendingContribs, {
+                    onConflict: 'group_id,user_id,cycle_number',
+                    ignoreDuplicates: true,
+                  });
+
+                if (pendingContribError) {
+                  // If unique constraint doesn't exist yet, fall back to insert and ignore duplicate errors
+                  // PostgreSQL error code 23505 = unique_violation
+                  console.warn('[verify-payment] Upsert failed, trying individual inserts:', JSON.stringify(pendingContribError));
+                  for (const contrib of pendingContribs) {
+                    const { error: singleError } = await supabase
+                      .from('contributions')
+                      .insert(contrib);
+                    if (singleError && (singleError as { code?: string }).code !== '23505') {
+                      console.error('[verify-payment] Single contribution insert error:', JSON.stringify(singleError));
+                    }
+                  }
+                } else {
+                  console.log(`[verify-payment] Generated ${pendingContribs.length} pending contributions for cycles 2-${totalCycles}`);
+                }
+              }
+            }
+          } catch (contribGenError) {
+            console.error('[verify-payment] Error generating pending contributions:', contribGenError);
+            // Non-critical: don't fail the payment verification
+          }
         }
       } else {
         console.log(`Group not yet full (${groupData?.current_members}/${groupData?.total_members})`);
@@ -324,35 +404,53 @@ serve(async (req) => {
       console.log('[verify-payment] Handling upfront contribution');
       const { data: group } = await supabase
         .from('groups')
-        .select('contribution_amount')
+        .select('contribution_amount, start_date')
         .eq('id', groupId)
         .single();
 
       if (group) {
-        // Record the first cycle contribution as paid
-        const { error: contribError } = await supabase
+        // Check if cycle 1 contribution already exists to avoid duplicates
+        const { data: existingContrib } = await supabase
           .from('contributions')
-          .insert({
-            group_id: groupId,
-            user_id: userId,
-            amount: group.contribution_amount,
-            cycle_number: 1,
-            status: 'paid',
-            paid_date: new Date().toISOString(),
-            transaction_ref: reference,
-            due_date: new Date().toISOString(),
-          });
+          .select('id')
+          .eq('group_id', groupId)
+          .eq('user_id', userId)
+          .eq('cycle_number', 1)
+          .maybeSingle();
 
-        if (contribError) {
-          console.error('[verify-payment] Upfront contribution error:', JSON.stringify(contribError));
+        if (existingContrib) {
+          console.log('[verify-payment] Cycle 1 contribution already exists, skipping insert');
         } else {
-          console.log('[verify-payment] Upfront contribution recorded');
-          // Update group total_collected
-          const { error: balanceError } = await supabase.rpc('increment_group_total_collected', {
-            p_group_id: groupId,
-            p_amount: group.contribution_amount
-          });
-          if (balanceError) console.error('[verify-payment] Balance update error:', JSON.stringify(balanceError));
+          // Use group start_date if available, otherwise today
+          const cycle1DueDate = group.start_date
+            ? new Date(group.start_date).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0];
+
+          // Record the first cycle contribution as paid
+          const { error: contribError } = await supabase
+            .from('contributions')
+            .insert({
+              group_id: groupId,
+              user_id: userId,
+              amount: group.contribution_amount,
+              cycle_number: 1,
+              status: 'paid',
+              paid_date: new Date().toISOString(),
+              transaction_ref: reference,
+              due_date: cycle1DueDate,
+            });
+
+          if (contribError) {
+            console.error('[verify-payment] Upfront contribution error:', JSON.stringify(contribError));
+          } else {
+            console.log('[verify-payment] Upfront contribution recorded');
+            // Update group total_collected
+            const { error: balanceError } = await supabase.rpc('increment_group_total_collected', {
+              p_group_id: groupId,
+              p_amount: group.contribution_amount
+            });
+            if (balanceError) console.error('[verify-payment] Balance update error:', JSON.stringify(balanceError));
+          }
         }
       }
     }
