@@ -139,15 +139,23 @@ async function processPaymentSuccess(
     return { success: false, error: 'Invalid payment metadata' };
   }
 
-  // Idempotency check: if the transaction is already completed, skip re-processing
-  const { data: existingTransaction } = await supabase
-    .from('transactions')
-    .select('status')
-    .eq('reference', reference)
-    .single();
+  // Atomically claim the transaction for processing.
+  // A single UPDATE … RETURNING ensures that only one concurrent webhook
+  // delivery can advance the status from 'pending'/'initialized' to
+  // 'processing'.  Any subsequent delivery for the same reference will find
+  // the row already beyond those states and be treated as a duplicate.
+  const { data: claimResult, error: claimError } = await supabase.rpc(
+    'claim_transaction_for_processing',
+    { p_reference: reference }
+  );
 
-  if (existingTransaction?.status === 'completed') {
-    console.log(`Payment ${reference} already processed — skipping duplicate webhook`);
+  if (claimError) {
+    console.error(`[paystack-webhook] Failed to claim transaction ${reference}:`, claimError);
+    return { success: false, error: 'Failed to claim transaction for processing' };
+  }
+
+  if (!claimResult?.success) {
+    console.log(`[paystack-webhook] Transaction ${reference} already claimed — skipping duplicate webhook`);
     return { success: true, reference, status: 'already_processed' };
   }
 
@@ -249,6 +257,9 @@ async function processPaymentSuccess(
   }
 
   // Non-contribution payment types: update transaction record then handle membership.
+  // The transaction is currently in 'processing' state (set by claim_transaction_for_processing
+  // above). We add an explicit status guard so the UPDATE only proceeds from 'processing',
+  // making the transition state-machine compliant (processing → completed).
   const { error: transactionUpdateError } = await supabase
     .from('transactions')
     .update({
@@ -264,7 +275,8 @@ async function processPaymentSuccess(
         },
       },
     })
-    .eq('reference', reference);
+    .eq('reference', reference)
+    .eq('status', 'processing');
 
   if (transactionUpdateError) {
     console.error('Error updating transaction record:', transactionUpdateError);
@@ -405,7 +417,9 @@ serve(async (req) => {
         break;
       
       case 'charge.failed': {
-        // Update transaction status to failed
+        // Update transaction status to failed.
+        // Only transition from non-terminal states to avoid overwriting a
+        // 'completed' record if a success webhook arrived first.
         await supabase
           .from('transactions')
           .update({
@@ -416,7 +430,8 @@ serve(async (req) => {
               failure_reason: event.data.gateway_response,
             },
           })
-          .eq('reference', event.data.reference);
+          .eq('reference', event.data.reference)
+          .in('status', ['pending', 'initialized', 'processing']);
 
         // Notify the user of the payment failure (best-effort)
         const failedUserId = event.data.metadata?.userId;

@@ -130,7 +130,7 @@ serve(async (req) => {
       group_id: groupId,
       amount,
       type: transactionType,
-      status: 'pending',
+      status: 'initialized',
       reference,
       description: paymentType === 'group_join' || paymentType === 'group_creation'
         ? 'Security Deposit + 1st Contribution + Service Fee'

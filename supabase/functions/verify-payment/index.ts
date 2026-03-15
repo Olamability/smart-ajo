@@ -133,16 +133,26 @@ serve(async (req) => {
     // Initialize Supabase client with service role key (bypasses RLS)
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Idempotency check: if the transaction is already completed, return success immediately
-    // This prevents double-processing when the endpoint is retried after a transient error
-    const { data: existingTransaction } = await supabase
-      .from('transactions')
-      .select('status')
-      .eq('reference', reference)
-      .single();
+    // Atomically claim the transaction for processing.
+    // This eliminates the TOCTOU race condition where a concurrent webhook
+    // delivery could process the same payment simultaneously.
+    const { data: claimResult, error: claimError } = await supabase.rpc(
+      'claim_transaction_for_processing',
+      { p_reference: reference }
+    );
 
-    if (existingTransaction?.status === 'completed') {
-      console.log(`Payment ${reference} already processed — returning cached success`);
+    if (claimError) {
+      console.error('Error claiming transaction for processing:', JSON.stringify(claimError));
+      return new Response(
+        JSON.stringify({ success: false, error: 'Failed to claim transaction for processing' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!claimResult?.success) {
+      // Transaction is already being processed (e.g. by the webhook) or is
+      // already completed/failed.  Return success so the frontend can proceed.
+      console.log(`Payment ${reference} already claimed/processed — returning cached success`);
       return new Response(
         JSON.stringify({
           success: true,
@@ -182,7 +192,10 @@ serve(async (req) => {
       );
     }
 
-    // Update transaction record to 'completed'
+    // Update transaction record to 'completed'.
+    // The transaction is currently in 'processing' state (set by the atomic claim
+    // above).  The explicit status guard ensures the UPDATE only proceeds from
+    // 'processing', making the transition state-machine compliant.
     console.log('Updating transaction record to completed');
     const { error: transactionUpdateError } = await supabase
       .from('transactions')
@@ -197,7 +210,8 @@ serve(async (req) => {
           },
         },
       })
-      .eq('reference', reference);
+      .eq('reference', reference)
+      .eq('status', 'processing');
 
     if (transactionUpdateError) {
       console.error('Error updating transaction record:', JSON.stringify(transactionUpdateError));

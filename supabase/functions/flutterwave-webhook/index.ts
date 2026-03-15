@@ -94,19 +94,30 @@ async function processChargeCompleted(
     return { success: false, error: 'Invalid payment metadata' };
   }
 
-  // Idempotency: skip if already completed
-  const { data: existing } = await supabase
-    .from('transactions')
-    .select('status')
-    .eq('reference', reference)
-    .single();
+  // Atomically claim the transaction for processing.
+  // A single UPDATE … RETURNING ensures that only one concurrent webhook
+  // delivery can advance the status from 'pending'/'initialized' to
+  // 'processing'.  Any subsequent delivery for the same reference will find
+  // the row already beyond those states and be treated as a duplicate.
+  const { data: claimResult, error: claimError } = await supabase.rpc(
+    'claim_transaction_for_processing',
+    { p_reference: reference }
+  );
 
-  if (existing?.status === 'completed') {
-    console.log(`[flutterwave-webhook] ${reference} already processed – skipping`);
+  if (claimError) {
+    console.error(`[flutterwave-webhook] Failed to claim transaction ${reference}:`, claimError);
+    return { success: false, error: 'Failed to claim transaction for processing' };
+  }
+
+  if (!claimResult?.success) {
+    console.log(`[flutterwave-webhook] Transaction ${reference} already claimed — skipping duplicate webhook`);
     return { success: true, reference, status: 'already_processed' };
   }
 
-  // Mark transaction completed
+  // Mark transaction completed.
+  // The transaction is currently in 'processing' state (set by the claim above).
+  // The explicit status guard ensures the UPDATE only proceeds from 'processing',
+  // making the transition state-machine compliant (processing → completed).
   const { error: txError } = await supabase
     .from('transactions')
     .update({
@@ -119,7 +130,8 @@ async function processChargeCompleted(
         webhook_timestamp: new Date().toISOString(),
       },
     })
-    .eq('reference', reference);
+    .eq('reference', reference)
+    .eq('status', 'processing');
 
   if (txError) {
     console.error('[flutterwave-webhook] Failed to update transaction:', txError);
