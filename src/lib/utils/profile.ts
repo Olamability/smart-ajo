@@ -52,7 +52,7 @@ export async function ensureUserProfile(
   // Method 1: Try using the RPC function (preferred)
   try {
     console.log('ensureUserProfile: Attempting profile creation via RPC function');
-    const { error: rpcError } = await supabase.rpc('create_user_profile', {
+    const { error: rpcError } = await supabase.rpc('create_user_profile_atomic', {
       p_user_id: authUser.id,
       p_email: userEmail,
       p_phone: phone,

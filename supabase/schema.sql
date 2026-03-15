@@ -609,6 +609,79 @@ CREATE TRIGGER create_wallet_on_user_creation
   FOR EACH ROW EXECUTE FUNCTION create_wallet_for_new_user();
 
 -- ----------------------------------------------------------------------------
+-- FUNCTION: Auto-create public.users profile on auth signup
+-- Fires after INSERT on auth.users and inserts into public.users using
+-- metadata (full_name, phone) stored during supabase.auth.signUp().
+-- ON CONFLICT DO NOTHING keeps this idempotent.
+-- SECURITY DEFINER lets the function bypass RLS for the insert.
+-- Errors are caught and logged so they never block auth user creation.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION handle_new_auth_user()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_phone     TEXT;
+  v_full_name TEXT;
+BEGIN
+  v_phone := COALESCE(
+    NULLIF(TRIM(NEW.raw_user_meta_data->>'phone'), ''),
+    'temp_' || SUBSTRING(NEW.id::TEXT, 1, 12)
+  );
+
+  v_full_name := COALESCE(
+    NULLIF(TRIM(NEW.raw_user_meta_data->>'full_name'), ''),
+    NULLIF(SPLIT_PART(NEW.email, '@', 1), ''),
+    'User'
+  );
+
+  INSERT INTO public.users (
+    id,
+    email,
+    phone,
+    full_name,
+    is_verified,
+    is_active,
+    is_admin,
+    kyc_status,
+    created_at,
+    updated_at
+  )
+  VALUES (
+    NEW.id,
+    NEW.email,
+    v_phone,
+    v_full_name,
+    FALSE,
+    TRUE,
+    FALSE,
+    'not_started',
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  RETURN NEW;
+EXCEPTION
+  WHEN unique_violation THEN
+    -- Profile already exists (created concurrently, e.g. by the RPC).
+    -- ON CONFLICT DO NOTHING should prevent this branch from ever being
+    -- reached, but guard it explicitly for safety.
+    RETURN NEW;
+  WHEN OTHERS THEN
+    -- Log unexpected errors without raising them so that auth user
+    -- creation always succeeds even when the profile insert fails.
+    RAISE WARNING 'handle_new_auth_user: could not create profile for user % (%): %',
+      NEW.id, NEW.email, SQLERRM;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION handle_new_auth_user();
+
+-- ----------------------------------------------------------------------------
 -- FUNCTION: Update group current_members count
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION update_group_member_count()
