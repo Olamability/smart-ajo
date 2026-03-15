@@ -12,17 +12,27 @@ import {
   UserCheck,
   Ban,
   Play,
-  Loader2,
   AlertCircle,
   DollarSign,
-  Shield
+  Shield,
+  Clock,
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import {
+  getAdminPayoutQueue,
+  approvePayout,
+  releasePayout,
+  type AdminPayoutQueueItem
+} from '@/api/admin';
+import { logger } from '@/utils/logger';
 import type {
   AdminUser,
   AdminGroup,
@@ -30,7 +40,7 @@ import type {
   AuditLog
 } from '../types';
 
-type TabType = 'overview' | 'users' | 'groups' | 'audit';
+type TabType = 'overview' | 'users' | 'groups' | 'payouts' | 'audit';
 
 export default function SystemAdminDashboard() {
   const { user } = useAuth();
@@ -41,6 +51,8 @@ export default function SystemAdminDashboard() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [groups, setGroups] = useState<AdminGroup[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [payouts, setPayouts] = useState<AdminPayoutQueueItem[]>([]);
+  const [payoutTab, setPayoutTab] = useState<'ready' | 'approved' | 'processing' | 'completed' | 'failed'>('ready');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -49,7 +61,7 @@ export default function SystemAdminDashboard() {
 
   useEffect(() => {
     checkAdminAccess();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   useEffect(() => {
@@ -61,9 +73,11 @@ export default function SystemAdminDashboard() {
       loadGroups();
     } else if (activeTab === 'audit') {
       loadAuditLogs();
+    } else if (activeTab === 'payouts') {
+      loadPayouts();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, searchTerm, statusFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, searchTerm, statusFilter, payoutTab]);
 
   const checkAdminAccess = async () => {
     if (!user) {
@@ -156,6 +170,58 @@ export default function SystemAdminDashboard() {
     } catch (error) {
       console.error('Error loading audit logs:', error);
       toast.error('Failed to load audit logs');
+    }
+  };
+
+  const loadPayouts = async () => {
+    try {
+      const result = await getAdminPayoutQueue(payoutTab);
+      if (result.success) {
+        setPayouts(result.data || []);
+      } else {
+        toast.error(result.error || 'Failed to load payouts');
+      }
+    } catch (error) {
+      logger.error('Error loading payouts:', error);
+      toast.error('Failed to load payouts');
+    }
+  };
+
+  const handleApprovePayout = async (payoutId: string) => {
+    setActionLoading(payoutId);
+    try {
+      const result = await approvePayout(payoutId);
+      if (result.success) {
+        toast.success('Payout approved successfully');
+        loadPayouts();
+        loadAnalytics(); // Refresh stats
+      } else {
+        toast.error(result.error || 'Failed to approve payout');
+      }
+    } catch (error) {
+      logger.error('Error approving payout:', error);
+      toast.error('Failed to approve payout');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReleasePayout = async (payoutId: string) => {
+    setActionLoading(payoutId);
+    try {
+      const result = await releasePayout(payoutId);
+      if (result.success) {
+        toast.success('Payout release initiated');
+        loadPayouts();
+        loadAnalytics(); // Refresh stats
+      } else {
+        toast.error(result.error || 'Failed to release payout');
+      }
+    } catch (error) {
+      logger.error('Error releasing payout:', error);
+      toast.error('Failed to release payout');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -256,6 +322,7 @@ export default function SystemAdminDashboard() {
               { id: 'overview', name: 'Overview', icon: BarChart3 },
               { id: 'users', name: 'Users', icon: Users },
               { id: 'groups', name: 'Groups', icon: Building2 },
+              { id: 'payouts', name: 'Payouts', icon: DollarSign },
               { id: 'audit', name: 'Audit Logs', icon: FileText }
             ].map((tab) => {
               const Icon = tab.icon;
@@ -467,8 +534,8 @@ export default function SystemAdminDashboard() {
                             <Badge
                               variant={
                                 user.kyc_status === 'approved' ? 'default' :
-                                user.kyc_status === 'pending' ? 'secondary' :
-                                'outline'
+                                  user.kyc_status === 'pending' ? 'secondary' :
+                                    'outline'
                               }
                             >
                               {user.kyc_status}
@@ -598,9 +665,9 @@ export default function SystemAdminDashboard() {
                             <Badge
                               variant={
                                 group.status === 'active' ? 'default' :
-                                group.status === 'forming' ? 'secondary' :
-                                group.status === 'completed' ? 'outline' :
-                                'destructive'
+                                  group.status === 'forming' ? 'secondary' :
+                                    group.status === 'completed' ? 'outline' :
+                                      'destructive'
                               }
                             >
                               {group.status}
@@ -654,6 +721,136 @@ export default function SystemAdminDashboard() {
                       <AlertCircle className="mx-auto h-12 w-12 text-gray-400" />
                       <h3 className="mt-2 text-sm font-medium text-gray-900">No groups found</h3>
                       <p className="mt-1 text-sm text-gray-500">Try adjusting your filters</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Payouts Tab */}
+        {activeTab === 'payouts' && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Payout Management</CardTitle>
+                <CardDescription>Approve and release funds to group members</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={payoutTab} onValueChange={(v) => setPayoutTab(v as any)} className="w-full">
+                  <TabsList className="grid w-full grid-cols-5">
+                    <TabsTrigger value="ready" className="flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Awaiting Approval
+                    </TabsTrigger>
+                    <TabsTrigger value="approved" className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Ready to Release
+                    </TabsTrigger>
+                    <TabsTrigger value="processing" className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4" />
+                      Processing
+                    </TabsTrigger>
+                    <TabsTrigger value="completed" className="flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      Completed
+                    </TabsTrigger>
+                    <TabsTrigger value="failed" className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4" />
+                      Failed
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Group & Cycle</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recipient</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requested</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {payouts.map((payout) => (
+                        <tr key={payout.payout_id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4">
+                            <div className="font-medium text-gray-900">{payout.group_name}</div>
+                            <div className="text-sm text-gray-500">Cycle {payout.cycle_number}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-gray-900">{payout.recipient_name}</div>
+                            <div className="text-sm text-gray-500">{payout.recipient_email}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-gray-900">{formatCurrency(payout.amount)}</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              <Badge variant={payout.status === 'completed' ? 'default' : 'secondary'}>
+                                {payout.status}
+                              </Badge>
+                              <Badge variant="outline" className="text-[10px] uppercase">
+                                Approval: {payout.approval_status}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500">
+                            {format(new Date(payout.created_at), 'MMM dd, yyyy')}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {payout.approval_status === 'ready' && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprovePayout(payout.payout_id)}
+                                disabled={actionLoading === payout.payout_id}
+                              >
+                                {actionLoading === payout.payout_id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                                    Approve
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                            {payout.approval_status === 'approved' && (
+                              <Button
+                                size="sm"
+                                variant="default"
+                                className="bg-green-600 hover:bg-green-700"
+                                onClick={() => handleReleasePayout(payout.payout_id)}
+                                disabled={actionLoading === payout.payout_id}
+                              >
+                                {actionLoading === payout.payout_id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <ArrowRight className="h-4 w-4 mr-1" />
+                                    Release Funds
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {payouts.length === 0 && (
+                    <div className="text-center py-12">
+                      <DollarSign className="mx-auto h-12 w-12 text-gray-400" />
+                      <h3 className="mt-2 text-sm font-medium text-gray-900">No payouts in this queue</h3>
+                      <p className="mt-1 text-sm text-gray-500">When cycles complete, payouts will appear here for management.</p>
                     </div>
                   )}
                 </div>
