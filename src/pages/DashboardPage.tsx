@@ -33,6 +33,7 @@ import {
   Phone,
   Edit,
   ArrowRight,
+  LogOut,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -42,7 +43,7 @@ const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
 
 export default function DashboardPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState<DashboardSection>('overview');
   const [stats, setStats] = useState<UserStats | null>(null);
@@ -97,6 +98,23 @@ export default function DashboardPage() {
         return <TrendingUp className="w-4 h-4" />;
       default:
         return <DollarSign className="w-4 h-4" />;
+    }
+  };
+
+  const getTransactionLabel = (type: string) => {
+    switch (type) {
+      case 'security_deposit':
+        return 'Security Deposit';
+      case 'contribution':
+        return 'Contribution';
+      case 'payout':
+        return 'Payout';
+      case 'penalty':
+        return 'Penalty';
+      case 'refund':
+        return 'Refund';
+      default:
+        return type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     }
   };
 
@@ -340,8 +358,8 @@ export default function DashboardPage() {
                           {getTransactionIcon(transaction.type)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm capitalize">
-                            {transaction.type.replace('_', ' ')}
+                          <p className="font-medium text-sm">
+                            {getTransactionLabel(transaction.type)}
                           </p>
                           <p className="text-xs text-muted-foreground truncate">
                             {transaction.description}
@@ -505,8 +523,8 @@ export default function DashboardPage() {
                     {getTransactionIcon(transaction.type)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm capitalize">
-                      {transaction.type.replace('_', ' ')}
+                    <p className="font-medium text-sm">
+                      {getTransactionLabel(transaction.type)}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">
                       {transaction.description}
@@ -654,6 +672,32 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Sign Out */}
+      <Card>
+        <CardContent className="pt-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">Sign Out</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Sign out of your Smart Ajo account
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                await logout();
+                navigate('/login', { replace: true });
+              }}
+              className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 
