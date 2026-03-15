@@ -191,93 +191,58 @@ serve(async (req) => {
       );
     }
 
-    // Step 3a: Save transaction — update transaction record to 'completed'
-    console.log('Updating transaction record to completed');
-    console.log('[PAYMENT TRACE][verify-contribution] Updating transaction record', {
+    // Steps 3a–3c (atomic): update the transaction record, mark the contribution
+    // as paid, and increment the group balance — all inside a single PostgreSQL
+    // function so the three writes succeed or fail together.
+    const contributionAmountNaira = paymentData.amount / KOBO_TO_NAIRA_DIVISOR;
+    const paidAt = new Date().toISOString();
+
+    console.log('[PAYMENT TRACE][verify-contribution] Calling record_contribution_payment RPC', {
       reference,
       contributionId,
       userId,
+      groupId,
+      contributionAmountNaira,
     });
-    const { error: transactionUpdateError } = await supabase
-      .from('transactions')
-      .update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        metadata: {
+
+    const { data: paymentResult, error: paymentRpcError } = await supabase.rpc(
+      'record_contribution_payment',
+      {
+        p_reference:       reference,
+        p_contribution_id: contributionId,
+        p_user_id:         userId,
+        p_group_id:        groupId,
+        p_amount_naira:    contributionAmountNaira,
+        p_paid_at:         paidAt,
+        p_metadata:        {
           ...metadata,
           verification: {
             paystack_response: paymentData,
-            verified_at: new Date().toISOString(),
+            verified_at:       paidAt,
           },
         },
-      })
-      .eq('reference', reference);
+      }
+    );
 
-    if (transactionUpdateError) {
-      console.error('Error updating transaction record:', JSON.stringify(transactionUpdateError));
+    if (paymentRpcError || !paymentResult?.success) {
+      const errMsg = paymentRpcError?.message ?? paymentResult?.error ?? 'Failed to record contribution payment';
+      console.error('[PAYMENT TRACE][verify-contribution] record_contribution_payment failed:', errMsg);
       return new Response(
-        JSON.stringify({ success: false, error: 'Failed to update transaction record' }),
+        JSON.stringify({ success: false, error: errMsg }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Transaction record updated successfully');
-    console.log('[PAYMENT TRACE][verify-contribution] Transaction update succeeded', { reference });
-
-    // Step 3b: Mark contribution as paid
-    console.log(`Updating contribution ${contributionId} to paid`);
-    console.log('[PAYMENT TRACE][verify-contribution] Updating contribution record', {
-      contributionId,
-      reference,
-      userId,
-    });
-    const { error: contributionError } = await supabase
-      .from('contributions')
-      .update({
-        status: 'paid',
-        paid_date: new Date().toISOString(),
-        transaction_ref: reference,
-      })
-      .eq('id', contributionId)
-      .eq('user_id', userId); // Extra safety check: only update own contribution
-
-    if (contributionError) {
-      console.error('Error updating contribution:', JSON.stringify(contributionError));
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to mark contribution as paid' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (paymentResult.already_processed) {
+      console.log(`[PAYMENT TRACE][verify-contribution] Contribution payment ${reference} already processed`);
+    } else {
+      console.log('[PAYMENT TRACE][verify-contribution] record_contribution_payment succeeded', {
+        reference,
+        contributionId,
+        groupId,
+        amount: contributionAmountNaira,
+      });
     }
-
-    console.log('Contribution marked as paid successfully');
-    console.log('[PAYMENT TRACE][verify-contribution] Contribution update succeeded', {
-      contributionId,
-      reference,
-    });
-
-    // Step 3c: Update group balance (total_collected)
-    // Increment the group's total_collected by the contribution amount (converted from kobo to naira)
-    const contributionAmountNaira = paymentData.amount / KOBO_TO_NAIRA_DIVISOR;
-    console.log(`Incrementing group ${groupId} total_collected by ${contributionAmountNaira}`);
-
-    const { error: balanceUpdateError } = await supabase.rpc('increment_group_total_collected', {
-      p_group_id: groupId,
-      p_amount: contributionAmountNaira,
-    });
-
-    if (balanceUpdateError) {
-      console.error('Error updating group balance via RPC:', JSON.stringify(balanceUpdateError));
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to update group balance' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Group total_collected incremented via RPC');
-    console.log('[PAYMENT TRACE][verify-contribution] Group balance increment succeeded', {
-      groupId,
-      amount: contributionAmountNaira,
-    });
 
     // Step 3d: Check if all cycle contributions are paid and prepare payout
     const { data: contributionData } = await supabase

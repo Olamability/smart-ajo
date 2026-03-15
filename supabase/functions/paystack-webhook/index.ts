@@ -151,19 +151,116 @@ async function processPaymentSuccess(
     return { success: true, reference, status: 'already_processed' };
   }
 
-  // Update transaction record to 'completed'
+  const completedAt = new Date().toISOString();
+
+  // For contribution payments the three writes (transaction, contribution, group
+  // balance) are performed atomically via the record_contribution_payment RPC.
+  // For all other payment types the transaction record is updated here and the
+  // type-specific logic follows.
+  if (paymentType === 'contribution') {
+    const contributionId = metadata?.contributionId;
+    if (!contributionId) {
+      return { success: false, error: 'Contribution ID required for contribution payment' };
+    }
+
+    const contributionAmountNaira = amount / KOBO_TO_NAIRA_DIVISOR;
+
+    const { data: paymentResult, error: paymentRpcError } = await supabase.rpc(
+      'record_contribution_payment',
+      {
+        p_reference:       reference,
+        p_contribution_id: contributionId,
+        p_user_id:         userId,
+        p_group_id:        groupId,
+        p_amount_naira:    contributionAmountNaira,
+        p_paid_at:         completedAt,
+        p_metadata:        {
+          ...metadata,
+          webhook_received:  true,
+          webhook_timestamp: completedAt,
+          verification: {
+            paystack_response: eventData,
+            verified_at:       completedAt,
+          },
+        },
+      }
+    );
+
+    if (paymentRpcError || !paymentResult?.success) {
+      const errMsg = paymentRpcError?.message ?? paymentResult?.error ?? 'Failed to record contribution payment';
+      console.error('[paystack-webhook] record_contribution_payment failed:', errMsg);
+      return { success: false, error: errMsg };
+    }
+
+    if (!paymentResult.already_processed) {
+      // Check if all members have contributed for this cycle and prepare payout
+      const { data: contributionData } = await supabase
+        .from('contributions')
+        .select('group_id, cycle_number')
+        .eq('id', contributionId)
+        .single();
+
+      if (contributionData) {
+        const cycleNumber  = contributionData.cycle_number;
+        const cycleGroupId = contributionData.group_id;
+        console.log(`[paystack-webhook] Checking cycle ${cycleNumber} readiness for group ${cycleGroupId}`);
+
+        const { data: cycleResult, error: cycleError } = await supabase.rpc(
+          'check_cycle_and_prepare_payout',
+          { p_group_id: cycleGroupId, p_cycle_number: cycleNumber }
+        );
+
+        if (cycleError) {
+          console.error('[paystack-webhook] Error checking cycle readiness:', cycleError);
+        } else if (cycleResult?.cycle_complete) {
+          console.log(`[paystack-webhook] Cycle ${cycleNumber} complete – payout prepared`, cycleResult);
+
+          if (cycleResult.payout_created && cycleResult.recipient_id) {
+            await supabase.rpc('send_payout_ready_notifications', {
+              p_group_id:     cycleGroupId,
+              p_cycle_number: cycleNumber,
+              p_recipient_id: cycleResult.recipient_id,
+            });
+          }
+        } else {
+          console.log(`[paystack-webhook] Cycle ${cycleNumber} not yet complete`, cycleResult);
+        }
+      }
+
+      // Notify the contributor their payment was received
+      await supabase.rpc('send_payment_notification', {
+        p_user_id: userId,
+        p_type:    'payment_received',
+        p_title:   'Contribution received',
+        p_message: `Your contribution of ₦${contributionAmountNaira.toLocaleString()} has been received.`,
+        p_metadata: { groupId, contributionId, reference },
+      });
+    }
+
+    await logAuditEvent(supabase, 'webhook_payment_processed', 'transaction', reference, {
+      event:       'charge.success',
+      paymentType,
+      userId,
+      groupId,
+      amount:      eventData.amount,
+    }, userId);
+
+    return { success: true, reference, status: paymentResult.already_processed ? 'already_processed' : 'processed' };
+  }
+
+  // Non-contribution payment types: update transaction record then handle membership.
   const { error: transactionUpdateError } = await supabase
     .from('transactions')
     .update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
+      status:      'completed',
+      completed_at: completedAt,
       metadata: {
         ...metadata,
-        webhook_received: true,
-        webhook_timestamp: new Date().toISOString(),
+        webhook_received:  true,
+        webhook_timestamp: completedAt,
         verification: {
           paystack_response: eventData,
-          verified_at: new Date().toISOString(),
+          verified_at:       completedAt,
         },
       },
     })
@@ -237,88 +334,6 @@ async function processPaymentSuccess(
         ? 'Your security deposit was received and your group is now forming.'
         : 'Your security deposit was received. Welcome to the group!',
       p_metadata: { groupId, paymentType, reference },
-    });
-  } else if (paymentType === 'contribution') {
-    // Update existing contribution record to mark as paid
-    const contributionId = metadata?.contributionId;
-    
-    if (!contributionId) {
-      return { success: false, error: 'Contribution ID required for contribution payment' };
-    }
-
-    // Update the contribution record to mark it as paid
-    const { error: contributionError } = await supabase
-      .from('contributions')
-      .update({
-        status: 'paid',
-        paid_date: new Date().toISOString(),
-        transaction_ref: reference,
-      })
-      .eq('id', contributionId)
-      .eq('user_id', userId); // Extra safety: only update own contribution
-
-    if (contributionError) {
-      console.error('Error updating contribution:', contributionError);
-      return { success: false, error: 'Failed to record contribution' };
-    }
-
-    // Update group balance (total_collected)
-    const contributionAmountNaira = amount / KOBO_TO_NAIRA_DIVISOR;
-    console.log(`Incrementing group ${groupId} total_collected by ${contributionAmountNaira}`);
-
-    const { error: balanceUpdateError } = await supabase.rpc('increment_group_total_collected', {
-      p_group_id: groupId,
-      p_amount: contributionAmountNaira,
-    });
-
-    if (balanceUpdateError) {
-      console.error('Error updating group balance:', balanceUpdateError);
-      return { success: false, error: 'Failed to update group balance' };
-    }
-
-    // Check if all members have contributed for this cycle and prepare payout
-    // Delegate to the check_cycle_and_prepare_payout RPC for atomic logic
-    const { data: contributionData } = await supabase
-      .from('contributions')
-      .select('group_id, cycle_number')
-      .eq('id', contributionId)
-      .single();
-
-    if (contributionData) {
-      const cycleNumber = contributionData.cycle_number;
-      const cycleGroupId = contributionData.group_id;
-      console.log(`[paystack-webhook] Checking cycle ${cycleNumber} readiness for group ${cycleGroupId}`);
-
-      const { data: cycleResult, error: cycleError } = await supabase.rpc(
-        'check_cycle_and_prepare_payout',
-        { p_group_id: cycleGroupId, p_cycle_number: cycleNumber }
-      );
-
-      if (cycleError) {
-        console.error('[paystack-webhook] Error checking cycle readiness:', cycleError);
-      } else if (cycleResult?.cycle_complete) {
-        console.log(`[paystack-webhook] Cycle ${cycleNumber} complete – payout prepared`, cycleResult);
-
-        // Notify all group members that the payout cycle is ready
-        if (cycleResult.payout_created && cycleResult.recipient_id) {
-          await supabase.rpc('send_payout_ready_notifications', {
-            p_group_id: cycleGroupId,
-            p_cycle_number: cycleNumber,
-            p_recipient_id: cycleResult.recipient_id,
-          });
-        }
-      } else {
-        console.log(`[paystack-webhook] Cycle ${cycleNumber} not yet complete`, cycleResult);
-      }
-    }
-
-    // Notify the contributor their payment was received
-    await supabase.rpc('send_payment_notification', {
-      p_user_id: userId,
-      p_type: 'payment_received',
-      p_title: 'Contribution received',
-      p_message: `Your contribution of ₦${contributionAmountNaira.toLocaleString()} has been received.`,
-      p_metadata: { groupId, contributionId, reference },
     });
   }
 
@@ -428,7 +443,7 @@ serve(async (req) => {
       }
 
       case 'transfer.success': {
-        // Payout transfer completed — mark payout and transaction as completed
+        // Payout transfer completed — atomically mark payout and transaction as completed.
         const transferEventData = event.data as unknown as PaystackTransferWebhookData;
         const transferCode = transferEventData.transfer_code ?? transferEventData.reference;
 
@@ -439,43 +454,38 @@ serve(async (req) => {
           .single();
 
         if (payoutRecord) {
-          await supabase
-            .from('payouts')
-            .update({
-              status: 'completed',
-              payout_date: new Date().toISOString().split('T')[0],
-            })
-            .eq('id', payoutRecord.id);
+          const { data: completeResult, error: completeError } = await supabase.rpc(
+            'complete_payout_transfer',
+            { p_payout_id: payoutRecord.id, p_transfer_code: transferCode }
+          );
 
-          // Update the matching payout transaction record using payout_id in metadata
-          await supabase
-            .from('transactions')
-            .update({ status: 'completed', completed_at: new Date().toISOString() })
-            .contains('metadata', { payout_id: payoutRecord.id })
-            .eq('type', 'payout');
+          if (completeError || !completeResult?.success) {
+            const errMsg = completeError?.message ?? completeResult?.error ?? 'Failed to complete payout transfer';
+            console.error(`[paystack-webhook] complete_payout_transfer failed for payout ${payoutRecord.id}:`, errMsg);
+          } else {
+            // Notify the recipient that their payout has been sent
+            await supabase.rpc('send_payment_notification', {
+              p_user_id: payoutRecord.recipient_id,
+              p_type: 'payout_processed',
+              p_title: 'Payout sent!',
+              p_message: `Your payout for cycle ${payoutRecord.cycle_number} has been sent to your bank account.`,
+              p_metadata: {
+                payout_id:    payoutRecord.id,
+                cycle_number: payoutRecord.cycle_number,
+                group_id:     payoutRecord.related_group_id,
+                transfer_code: transferCode,
+              },
+            });
 
-          // Notify the recipient that their payout has been sent
-          await supabase.rpc('send_payment_notification', {
-            p_user_id: payoutRecord.recipient_id,
-            p_type: 'payout_processed',
-            p_title: 'Payout sent!',
-            p_message: `Your payout for cycle ${payoutRecord.cycle_number} has been sent to your bank account.`,
-            p_metadata: {
-              payout_id: payoutRecord.id,
-              cycle_number: payoutRecord.cycle_number,
-              group_id: payoutRecord.related_group_id,
+            await logAuditEvent(supabase, 'payout_completed', 'payout', payoutRecord.id, {
               transfer_code: transferCode,
-            },
-          });
+              recipient_id:  payoutRecord.recipient_id,
+              cycle_number:  payoutRecord.cycle_number,
+              group_id:      payoutRecord.related_group_id,
+            }, payoutRecord.recipient_id);
 
-          await logAuditEvent(supabase, 'payout_completed', 'payout', payoutRecord.id, {
-            transfer_code: transferCode,
-            recipient_id: payoutRecord.recipient_id,
-            cycle_number: payoutRecord.cycle_number,
-            group_id: payoutRecord.related_group_id,
-          }, payoutRecord.recipient_id);
-
-          console.log(`[paystack-webhook] Payout ${payoutRecord.id} marked as completed`);
+            console.log(`[paystack-webhook] Payout ${payoutRecord.id} marked as completed`);
+          }
         } else {
           console.warn(`[paystack-webhook] No payout found for transfer_code: ${transferCode}`);
         }

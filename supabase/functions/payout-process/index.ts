@@ -231,32 +231,26 @@ async function processSinglePayout(
       `[payout-process] Transfer initiated: ${transferData.data.transfer_code}`,
     );
 
-    // Step 4: Update payout with the Paystack transfer_code for webhook reconciliation
-    await supabase
-      .from('payouts')
-      .update({
-        payment_method: 'paystack_transfer',
-        payment_reference: transferData.data.transfer_code,
-        notes:
-          `Transfer code: ${transferData.data.transfer_code}; ` +
-          `Reference: ${transferReference}`,
-      })
-      .eq('id', payout.id);
+    // Steps 4+5 (atomic): update payout with the Paystack transfer_code and
+    // insert the corresponding transaction record — both in a single RPC call.
+    const { data: initiationResult, error: initiationError } = await supabase.rpc(
+      'record_payout_initiation',
+      {
+        p_payout_id:          payout.id,
+        p_user_id:            user.id,
+        p_group_id:           payout.related_group_id,
+        p_cycle_number:       payout.cycle_number,
+        p_amount_kobo:        amountInKobo,
+        p_transfer_code:      transferData.data.transfer_code,
+        p_transfer_reference: transferReference,
+      }
+    );
 
-    // Step 5: Insert a corresponding payout transaction record
-    await supabase.from('transactions').insert({
-      user_id: user.id,
-      group_id: payout.related_group_id,
-      amount: amountInKobo,
-      type: 'payout',
-      status: 'processing',
-      reference: transferReference,
-      metadata: {
-        payout_id: payout.id,
-        cycle_number: payout.cycle_number,
-        transfer_code: transferData.data.transfer_code,
-      },
-    });
+    if (initiationError || !initiationResult?.success) {
+      throw new Error(
+        initiationResult?.error ?? initiationError?.message ?? 'Failed to record payout initiation'
+      );
+    }
 
     // Step 6: Audit log the successful transfer initiation
     await logAuditEvent(supabase, 'payout_initiated', 'payout', payout.id, {
