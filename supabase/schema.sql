@@ -251,7 +251,10 @@ CREATE TABLE group_members (
   
   -- Constraints
   CONSTRAINT position_positive CHECK (position > 0),
-  CONSTRAINT security_deposit_amount_non_negative CHECK (security_deposit_amount >= 0)
+  CONSTRAINT security_deposit_amount_non_negative CHECK (security_deposit_amount >= 0),
+
+  -- Slot allocation protection: prevent two members from sharing the same payout position
+  CONSTRAINT unique_group_member_position UNIQUE (group_id, position)
 );
 
 -- Indexes for group_members table
@@ -259,7 +262,6 @@ CREATE INDEX idx_group_members_user_id ON group_members(user_id);
 CREATE INDEX idx_group_members_group_id ON group_members(group_id);
 CREATE INDEX idx_group_members_status ON group_members(status);
 CREATE INDEX idx_group_members_position ON group_members(group_id, position);
-CREATE UNIQUE INDEX idx_group_members_position_unique ON group_members(group_id, position);
 
 -- ----------------------------------------------------------------------------
 -- GROUP_JOIN_REQUESTS TABLE
