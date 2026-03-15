@@ -15,6 +15,7 @@ import { createClient } from '@/lib/client/supabase';
 import { getErrorMessage } from '@/lib/utils';
 import { calculateBackoffDelay } from '@/lib/utils/auth';
 import { logAuditEvent, logApiError } from '@/api/audit';
+import { logger } from '@/utils/logger';
 
 export interface PaymentInitializationResult {
   success: boolean;
@@ -35,35 +36,35 @@ export interface PaymentVerificationResult {
  */
 async function ensureSessionAvailable(maxAttempts = 5): Promise<boolean> {
   const supabase = createClient();
-  
+
   for (let attempts = 0; attempts < maxAttempts; attempts++) {
     const { data: { session }, error } = await supabase.auth.getSession();
-    
+
     if (error) {
       console.error('ensureSessionAvailable: Session error:', error);
       if (attempts < maxAttempts - 1) {
         const delay = calculateBackoffDelay(attempts);
-        console.log(`ensureSessionAvailable: Retrying in ${delay}ms (attempt ${attempts + 1}/${maxAttempts})`);
+        logger.log(`ensureSessionAvailable: Retrying (attempt ${attempts + 1}/${maxAttempts})`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
       return false;
     }
-    
+
     if (session) {
-      console.log('ensureSessionAvailable: Session is available');
+      logger.log('ensureSessionAvailable: Session is available');
       return true;
     }
-    
+
     // No session yet, wait and retry
     if (attempts < maxAttempts - 1) {
       const delay = calculateBackoffDelay(attempts);
-      console.log(`ensureSessionAvailable: Session not ready, retrying in ${delay}ms (attempt ${attempts + 1}/${maxAttempts})`);
+      logger.log(`ensureSessionAvailable: Session not ready, retrying (attempt ${attempts + 1}/${maxAttempts})`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  
-  console.log('ensureSessionAvailable: Session not available after retries');
+
+  logger.log('ensureSessionAvailable: Session not available after retries');
   return false;
 }
 
@@ -246,8 +247,8 @@ export const verifyPaymentAndActivateMembership = async (
   reference: string
 ): Promise<PaymentVerificationResult> => {
   try {
-    console.log('verifyPaymentAndActivateMembership: Starting verification for reference:', reference);
-    
+    logger.log('verifyPaymentAndActivateMembership: Starting verification');
+
     // Ensure session is available before attempting verification
     // This is crucial after payment redirects
     const sessionAvailable = await ensureSessionAvailable();
@@ -255,7 +256,7 @@ export const verifyPaymentAndActivateMembership = async (
       console.error('verifyPaymentAndActivateMembership: Session not available');
       return { success: false, error: 'Session not available. Please try refreshing the page or logging in again.' };
     }
-    
+
     const supabase = createClient();
 
     // Get current user
@@ -264,7 +265,7 @@ export const verifyPaymentAndActivateMembership = async (
       return { success: false, error: 'Not authenticated' };
     }
 
-    console.log('verifyPaymentAndActivateMembership: Calling verify-payment function');
+    logger.log('verifyPaymentAndActivateMembership: Calling verify-payment function');
     // Call Supabase Edge Function to verify payment
     const { data, error } = await supabase.functions.invoke('verify-payment', {
       body: { reference },
@@ -281,7 +282,7 @@ export const verifyPaymentAndActivateMembership = async (
       return { success: false, error: errorMsg };
     }
 
-    console.log('verifyPaymentAndActivateMembership: Payment verified successfully');
+    logger.log('verifyPaymentAndActivateMembership: Payment verified successfully');
     await logAuditEvent({
       action: 'payment_verified',
       resourceType: 'transaction',
@@ -304,15 +305,15 @@ export const verifyPaymentAndRecordContribution = async (
   reference: string
 ): Promise<PaymentVerificationResult> => {
   try {
-    console.log('verifyPaymentAndRecordContribution: Starting verification for reference:', reference);
-    
+    logger.log('verifyPaymentAndRecordContribution: Starting verification');
+
     // Ensure session is available before attempting verification
     const sessionAvailable = await ensureSessionAvailable();
     if (!sessionAvailable) {
       console.error('verifyPaymentAndRecordContribution: Session not available');
       return { success: false, error: 'Session not available. Please try refreshing the page or logging in again.' };
     }
-    
+
     const supabase = createClient();
 
     // Get current user
@@ -321,18 +322,13 @@ export const verifyPaymentAndRecordContribution = async (
       return { success: false, error: 'Not authenticated' };
     }
 
-    console.log('verifyPaymentAndRecordContribution: Calling verify-contribution function');
-    console.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution invoking edge function', { reference });
+    logger.log('verifyPaymentAndRecordContribution: Calling verify-contribution function');
+    logger.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution invoking edge function');
     // Call the dedicated verify-contribution Edge Function which also updates group balance
     const { data, error } = await supabase.functions.invoke('verify-contribution', {
       body: { reference },
     });
-    console.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution edge response', {
-      reference,
-      hasError: Boolean(error),
-      success: data?.success,
-      verified: data?.verified,
-    });
+    logger.log('[PAYMENT TRACE] verifyPaymentAndRecordContribution edge response');
 
     if (error) {
       console.error('verifyPaymentAndRecordContribution: Error verifying payment:', error);
@@ -345,7 +341,7 @@ export const verifyPaymentAndRecordContribution = async (
       return { success: false, error: errorMsg };
     }
 
-    console.log('verifyPaymentAndRecordContribution: Payment verified successfully');
+    logger.log('verifyPaymentAndRecordContribution: Payment verified successfully');
     await logAuditEvent({
       action: 'contribution_paid',
       resourceType: 'transaction',
@@ -375,8 +371,8 @@ export const verifyContributionPayment = async (
   reference: string
 ): Promise<PaymentVerificationResult> => {
   try {
-    console.log('verifyContributionPayment: Starting verification for reference:', reference);
-    console.log('[PAYMENT TRACE] verifyContributionPayment start', { reference });
+    logger.log('verifyContributionPayment: Starting verification');
+    logger.log('[PAYMENT TRACE] verifyContributionPayment start');
 
     // Ensure session is available before attempting verification
     const sessionAvailable = await ensureSessionAvailable();
@@ -393,18 +389,13 @@ export const verifyContributionPayment = async (
       return { success: false, error: 'Not authenticated' };
     }
 
-    console.log('verifyContributionPayment: Calling verify-contribution function');
-    console.log('[PAYMENT TRACE] verifyContributionPayment invoking edge function', { reference });
+    logger.log('verifyContributionPayment: Calling verify-contribution function');
+    logger.log('[PAYMENT TRACE] verifyContributionPayment invoking edge function');
     // Call the dedicated verify-contribution Edge Function
     const { data, error } = await supabase.functions.invoke('verify-contribution', {
       body: { reference },
     });
-    console.log('[PAYMENT TRACE] verifyContributionPayment edge response', {
-      reference,
-      hasError: Boolean(error),
-      success: data?.success,
-      verified: data?.verified,
-    });
+    logger.log('[PAYMENT TRACE] verifyContributionPayment edge response');
 
     if (error) {
       console.error('verifyContributionPayment: Error verifying contribution payment:', error);
@@ -417,7 +408,7 @@ export const verifyContributionPayment = async (
       return { success: false, error: errorMsg };
     }
 
-    console.log('verifyContributionPayment: Contribution payment verified successfully');
+    logger.log('verifyContributionPayment: Contribution payment verified successfully');
     await logAuditEvent({
       action: 'contribution_paid',
       resourceType: 'transaction',

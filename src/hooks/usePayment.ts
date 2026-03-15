@@ -18,6 +18,7 @@ import { paystackService } from '@/lib/paystackService';
 import type { PaymentMetadata } from '@/lib/paystackService';
 import { createClient } from '@/lib/client/supabase';
 import { toast } from 'sonner';
+import { logger } from '@/utils/logger';
 
 export type PaymentType = 'group_creation' | 'group_join' | 'contribution';
 
@@ -84,20 +85,20 @@ export function usePayment(): UsePaymentReturn {
       const initBody =
         params.type === 'contribution'
           ? {
-              groupId: params.groupId,
-              amount: paystackService.toKobo(params.amount),
-              paymentType: params.type,
-              contributionId: params.contributionId,
-              cycleNumber: params.cycleNumber,
-            }
+            groupId: params.groupId,
+            amount: paystackService.toKobo(params.amount),
+            paymentType: params.type,
+            contributionId: params.contributionId,
+            cycleNumber: params.cycleNumber,
+          }
           : {
-              groupId: params.groupId,
-              amount: paystackService.toKobo(params.amount),
-              paymentType: params.type,
-              slotNumber: params.slotNumber,
-            };
+            groupId: params.groupId,
+            amount: paystackService.toKobo(params.amount),
+            paymentType: params.type,
+            slotNumber: params.slotNumber,
+          };
 
-      console.log('[usePayment] Calling initialize-payment edge function', initBody);
+      logger.log('[usePayment] Calling initialize-payment edge function');
 
       const { data: initData, error: initError } = await supabase.functions.invoke(
         'initialize-payment',
@@ -113,7 +114,7 @@ export function usePayment(): UsePaymentReturn {
       }
 
       const { reference } = initData as { reference: string };
-      console.log('[usePayment] Pending transaction created', { reference });
+      logger.log('[usePayment] Pending transaction created');
 
       const typeParam = params.type === 'contribution' ? '&type=contribution' : '';
 
@@ -121,18 +122,18 @@ export function usePayment(): UsePaymentReturn {
       const metadata: PaymentMetadata =
         params.type === 'contribution'
           ? {
-              userId: user.id,
-              groupId: params.groupId,
-              paymentType: 'contribution',
-              contributionId: params.contributionId,
-              cycleNumber: params.cycleNumber,
-            }
+            userId: user.id,
+            groupId: params.groupId,
+            paymentType: 'contribution',
+            contributionId: params.contributionId,
+            cycleNumber: params.cycleNumber,
+          }
           : {
-              userId: user.id,
-              groupId: params.groupId,
-              paymentType: params.type,
-              slotNumber: params.slotNumber,
-            };
+            userId: user.id,
+            groupId: params.groupId,
+            paymentType: params.type,
+            slotNumber: params.slotNumber,
+          };
 
       // Step 2: Open Paystack popup
       await paystackService.openPopup({
@@ -144,7 +145,7 @@ export function usePayment(): UsePaymentReturn {
           const resolvedRef = response.reference ?? reference;
           const resolvedPath = `/payment/success?reference=${resolvedRef}&group=${params.groupId}${typeParam}`;
 
-          console.log('[usePayment] Payment successful', { reference: resolvedRef });
+          logger.log('[usePayment] Payment successful');
           toast.success('Payment completed! Verifying…');
 
           // Layer 2: inline fire-and-forget verification
@@ -154,16 +155,15 @@ export function usePayment(): UsePaymentReturn {
             .invoke(verifyFn, { body: { reference: resolvedRef }, headers: authHeaders })
             .then(({ data, error: fnErr }) => {
               if (fnErr || !data?.success) {
-                console.warn(
-                  '[usePayment] Inline verification failed — webhook & success page fallback',
-                  fnErr?.message ?? data?.error
+                logger.warn(
+                  '[usePayment] Inline verification failed — webhook & success page fallback'
                 );
               } else {
-                console.log('[usePayment] Inline verification succeeded', { reference: resolvedRef });
+                logger.log('[usePayment] Inline verification succeeded');
               }
             })
             .catch((err: unknown) => {
-              console.warn('[usePayment] Inline verification error (non-critical):', err);
+              logger.warn('[usePayment] Inline verification non-critical issue');
             });
 
           // Layer 3: redirect to success page
@@ -171,7 +171,7 @@ export function usePayment(): UsePaymentReturn {
           window.location.href = resolvedPath;
         },
         onClose: () => {
-          console.log('[usePayment] Payment popup closed by user');
+          logger.log('[usePayment] Payment popup closed by user');
           toast.info('Payment cancelled');
           setIsProcessing(false);
         },

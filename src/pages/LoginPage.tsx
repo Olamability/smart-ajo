@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { mapAuthErrorToMessage, isEmailConfirmationRequired } from '@/lib/utils/authErrors';
 import { reportError } from '@/lib/utils/errorTracking';
+import { logger } from '@/utils/logger';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -42,35 +43,35 @@ export default function LoginPage() {
     if (!isMountedRef.current) return;
 
     setIsLoading(true);
-    console.log('LoginPage: Starting login for:', data.email);
-    
+    logger.log('LoginPage: Starting login');
+
     try {
-      console.log('LoginPage: Calling login function...');
+      logger.log('LoginPage: Calling login function...');
       await login(data.email, data.password);
-      
+
       if (!isMountedRef.current) {
-        console.log('LoginPage: Component unmounted, aborting');
+        logger.log('LoginPage: Component unmounted, aborting');
         return;
       }
 
-      console.log('LoginPage: Login successful, navigating to dashboard');
+      logger.log('LoginPage: Login successful, navigating to dashboard');
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (error) {
       if (!isMountedRef.current) return;
 
       console.error('LoginPage: Login failed with error:', error);
-      
+
       // Report error with context for tracking
       reportError(error, {
         operation: 'login',
         email: data.email,
       });
-      
+
       // Use the new auth error mapping utility for user-friendly messages
       const errorMessage = mapAuthErrorToMessage(error);
       console.error('LoginPage: Showing error to user:', errorMessage);
-      
+
       // Show different toast styles for email confirmation vs other errors
       if (isEmailConfirmationRequired(error)) {
         toast.warning(errorMessage, { duration: 6000 });
@@ -80,7 +81,7 @@ export default function LoginPage() {
     } finally {
       // ALWAYS reset loading state, whether success or failure
       if (isMountedRef.current) {
-        console.log('LoginPage: Resetting loading state');
+        logger.log('LoginPage: Resetting loading state');
         setIsLoading(false);
       }
     }
@@ -104,24 +105,24 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input 
-                id="email" 
-                type="email" 
-                placeholder="john@example.com" 
-                {...register('email')} 
-                disabled={isLoading} 
+              <Input
+                id="email"
+                type="email"
+                placeholder="john@example.com"
+                {...register('email')}
+                disabled={isLoading}
               />
               {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                placeholder="••••••••" 
-                {...register('password')} 
-                disabled={isLoading} 
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                {...register('password')}
+                disabled={isLoading}
               />
               {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
             </div>

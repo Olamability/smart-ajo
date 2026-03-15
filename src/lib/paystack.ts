@@ -13,6 +13,7 @@
  */
 
 // Window.PaystackPop is declared in paystackService.ts (single canonical source).
+import { logger } from '@/utils/logger';
 
 export interface PaystackConfig {
   key?: string;
@@ -60,7 +61,7 @@ class PaystackService {
 
   constructor() {
     this.publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY || '';
-    
+
     if (!this.publicKey) {
       console.error('Paystack public key not configured');
     }
@@ -132,7 +133,7 @@ class PaystackService {
     config: PaystackConfig
   ): Promise<PaystackResponse> {
     const publicKey = config.key || this.publicKey;
-    
+
     if (!publicKey) {
       throw new Error('Paystack public key not configured. Please set VITE_PAYSTACK_PUBLIC_KEY in your environment variables.');
     }
@@ -160,10 +161,7 @@ class PaystackService {
           metadata: config.metadata || {},
           callback_url: config.callback_url,
           onSuccess: (response: PaystackResponse) => {
-            console.log('[PAYMENT TRACE] Paystack onSuccess callback fired', {
-              reference: response.reference,
-              status: response.status,
-            });
+            logger.log('[PAYMENT TRACE] Paystack onSuccess callback fired');
             paymentCompleted = true;
             if (config.onSuccess) {
               config.onSuccess(response);
@@ -227,7 +225,7 @@ class PaystackService {
   public async verifyPayment(reference: string): Promise<Record<string, unknown>> {
     // This will be handled by Supabase Edge Function
     // Frontend should call the edge function endpoint
-    console.warn('Payment verification should be done on backend via Edge Function');
+    logger.warn('Payment verification should be done on backend via Edge Function');
     return { reference, verified: false };
   }
 }
@@ -254,7 +252,7 @@ export const initiatePaystackPayment = async (params: {
     paymentType: 'contribution',
     ...params.metadata,
   };
-  
+
   return paystackService.initializePayment({
     key: paystackService['publicKey'], // Access private field for consistency
     email: params.email,

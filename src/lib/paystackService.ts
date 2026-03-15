@@ -17,6 +17,8 @@ declare global {
   }
 }
 
+import { logger } from '@/utils/logger';
+
 export interface PaystackPopupConfig {
   key: string;
   email: string;
@@ -129,17 +131,14 @@ class PaystackService {
       currency: 'NGN',
       metadata: config.metadata as unknown as Record<string, unknown>,
       callback: (response: PaystackSuccessResponse) => {
-        console.log('[PaystackService] Payment successful', {
-          reference: response.reference,
-          status: response.status,
-        });
+        logger.log('[PaystackService] Payment successful');
         paymentCompleted = true;
         config.onSuccess(response);
       },
       onClose: () => {
         // Paystack also triggers onClose after a successful payment — ignore that.
         if (!paymentCompleted) {
-          console.log('[PaystackService] Popup closed by user without completing payment');
+          logger.log('[PaystackService] Popup closed by user without completing payment');
           config.onClose?.();
         }
       },

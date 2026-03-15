@@ -23,6 +23,7 @@ import {
   parseRateLimitWaitSeconds,
   mapAuthErrorToMessage,
 } from '@/lib/utils/authErrors';
+import { logger } from '@/utils/logger';
 
 const signUpSchema = z
   .object({
@@ -86,7 +87,7 @@ export default function SignUpPage() {
     setEmailConfirmationRequired(false);
 
     try {
-      console.log('SignupPage: Calling signUp function for', data.email);
+      logger.log('SignupPage: Calling signUp function');
       await signUp({
         email: data.email,
         password: data.password,

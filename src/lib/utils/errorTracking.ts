@@ -6,6 +6,7 @@
  */
 
 import * as Sentry from '@sentry/react';
+import { logger } from '@/utils/logger';
 
 /**
  * Context information for error reporting
@@ -55,7 +56,9 @@ export function reportError(error: unknown, context: ErrorContext = {}): void {
   const sanitizedContext = sanitizeContext(enrichedContext);
 
   console.error('Error:', error);
-  console.error('Context:', sanitizedContext);
+  // Do not log context to console.error if it might contain sensitive data, 
+  // even if sanitized, keep it for Sentry only.
+  // console.error('Context:', sanitizedContext);
 
   Sentry.withScope(scope => {
     scope.setExtras(sanitizedContext);
@@ -74,8 +77,8 @@ export function reportWarning(message: string, context: ErrorContext = {}): void
 
   const sanitizedContext = sanitizeContext(enrichedContext);
 
-  console.warn('Warning:', message);
-  console.warn('Context:', sanitizedContext);
+  logger.warn('Warning:', message);
+  logger.warn('Context:', sanitizedContext);
 
   Sentry.withScope(scope => {
     scope.setExtras(sanitizedContext);
@@ -94,8 +97,8 @@ export function reportInfo(message: string, context: ErrorContext = {}): void {
 
   const sanitizedContext = sanitizeContext(enrichedContext);
 
-  console.info('Info:', message);
-  console.info('Context:', sanitizedContext);
+  logger.info('Info:', message);
+  logger.info('Context:', sanitizedContext);
 
   Sentry.withScope(scope => {
     scope.setExtras(sanitizedContext);

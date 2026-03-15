@@ -4,6 +4,7 @@ import { createClient } from '@/lib/client/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Shield, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { logger } from '@/utils/logger';
 
 // Constants for better maintainability
 const SUPABASE_SESSION_DELAY = 1000; // Wait time for Supabase to process confirmation
@@ -18,47 +19,41 @@ export default function AuthCallbackPage() {
     const handleEmailConfirmation = async () => {
       try {
         const supabase = createClient();
-        
+
         // Get the hash from the URL (Supabase sends confirmation as #access_token=...)
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const accessToken = hashParams.get('access_token');
         const type = hashParams.get('type');
-        
-        if (import.meta.env.DEV) {
-          console.log('Auth callback - type:', type, 'has access token:', !!accessToken);
+
+        if (accessToken) {
+          logger.log('Auth callback received');
         }
 
         if (type === 'signup' && accessToken) {
           // Email confirmation successful
-          if (import.meta.env.DEV) {
-            console.log('Email confirmation detected, verifying session...');
-          }
-          
+          logger.log('Email confirmation detected, verifying session...');
+
           // Wait a moment for Supabase to process the confirmation
           await new Promise(resolve => setTimeout(resolve, SUPABASE_SESSION_DELAY));
-          
+
           // Check if we have a valid session
           const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-          
+
           if (sessionError) {
             console.error('Session error:', sessionError);
             throw new Error('Failed to verify your session. Please try logging in.');
           }
 
           if (session) {
-            if (import.meta.env.DEV) {
-              console.log('Session confirmed, email verified successfully');
-            }
+            logger.log('Session confirmed, email verified successfully');
             setStatus('success');
-            
+
             // Redirect to dashboard after a short delay
             setTimeout(() => {
               navigate('/dashboard', { replace: true });
             }, REDIRECT_DELAY);
           } else {
-            if (import.meta.env.DEV) {
-              console.log('No session found, redirecting to login');
-            }
+            logger.log('No session found, redirecting to login');
             setStatus('success');
             setTimeout(() => {
               navigate('/login', { replace: true });
@@ -66,15 +61,11 @@ export default function AuthCallbackPage() {
           }
         } else if (type === 'recovery') {
           // Password recovery flow
-          if (import.meta.env.DEV) {
-            console.log('Password recovery detected');
-          }
+          logger.log('Password recovery detected');
           navigate('/reset-password', { replace: true });
         } else {
           // No valid confirmation token
-          if (import.meta.env.DEV) {
-            console.log('No valid confirmation parameters found');
-          }
+          logger.log('No valid confirmation parameters found');
           throw new Error('Invalid confirmation link. Please try signing up again.');
         }
       } catch (error) {
@@ -111,7 +102,7 @@ export default function AuthCallbackPage() {
           {status === 'loading' && (
             <Loader2 className="h-12 w-12 animate-spin text-primary" />
           )}
-          
+
           {status === 'success' && (
             <>
               <CheckCircle2 className="h-12 w-12 text-green-600" />
@@ -120,7 +111,7 @@ export default function AuthCallbackPage() {
               </p>
             </>
           )}
-          
+
           {status === 'error' && (
             <>
               <XCircle className="h-12 w-12 text-destructive" />

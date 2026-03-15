@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CheckCircle, Loader2, XCircle, ArrowRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { logger } from '@/utils/logger';
 
 export default function PaymentSuccessPage() {
   const [searchParams] = useSearchParams();
@@ -53,7 +54,7 @@ export default function PaymentSuccessPage() {
       // already recorded by the webhook or the inline verification in usePayment.
       // Retry a few times with short delays — the webhook may still be in-flight when
       // the user lands on this page, so give it a moment before falling back.
-      console.log('[PaymentSuccessPage] Polling DB for transaction status', { reference });
+      logger.log('[PaymentSuccessPage] Polling DB for transaction status');
       const DB_POLL_ATTEMPTS = 3;
       const DB_POLL_DELAY_MS = 600;
       let txnStatus: string | null = null;
@@ -72,7 +73,7 @@ export default function PaymentSuccessPage() {
       }
 
       if (txnStatus === 'completed') {
-        console.log('[PaymentSuccessPage] Payment already recorded (webhook/inline)', { reference });
+        logger.log('[PaymentSuccessPage] Payment already recorded (webhook/inline)');
         setVerified(true);
         const msg = isContribution
           ? 'Payment verified! Your contribution has been recorded.'
@@ -86,10 +87,7 @@ export default function PaymentSuccessPage() {
       // Contributions use verify-contribution; membership payments use verify-payment.
       // This covers slow webhooks or cases where the inline verification didn't complete.
       const verifyFn = isContribution ? 'verify-contribution' : 'verify-payment';
-      console.log(`[PaymentSuccessPage] Calling ${verifyFn} edge function`, {
-        reference,
-        currentStatus: txnStatus ?? 'not found',
-      });
+      logger.log('[PaymentSuccessPage] Calling verification edge function');
       const { data, error: fnError } = await supabase.functions.invoke(verifyFn, {
         body: { reference },
       });
@@ -102,7 +100,7 @@ export default function PaymentSuccessPage() {
         throw new Error(data?.error ?? 'Payment verification failed');
       }
 
-      console.log('[PaymentSuccessPage] Verification successful', data);
+      logger.log('[PaymentSuccessPage] Verification successful');
       setVerified(true);
       const msg = isContribution
         ? 'Payment verified! Your contribution has been recorded.'

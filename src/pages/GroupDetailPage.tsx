@@ -12,6 +12,7 @@ import {
   getTakenSlots,
 } from '@/api';
 import { createClient } from '@/lib/client/supabase';
+import { logger } from '@/utils/logger';
 import type { Group, GroupMember } from '@/types';
 import { usePayment } from '@/hooks/usePayment';
 import ContributionsList from '@/components/ContributionsList';
@@ -142,9 +143,7 @@ export default function GroupDetailPage() {
   useEffect(() => {
     const shouldReload = searchParams.get('reload');
     if (id && shouldReload === 'true') {
-      if (import.meta.env.DEV) {
-        console.log('Reloading data after payment verification...');
-      }
+      logger.log('Reloading data after payment verification...');
 
       // Reload all data to reflect updated membership status
       loadGroupDetails();

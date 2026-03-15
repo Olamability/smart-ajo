@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { getErrorMessage } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { logger } from '@/utils/logger';
 
 const adminLoginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -32,7 +33,7 @@ export default function SystemAdminLoginPage() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    
+
     // Handle admin user redirection and access control
     if (user) {
       if (user.isAdmin) {
@@ -46,7 +47,7 @@ export default function SystemAdminLoginPage() {
         }, 2000);
       }
     }
-    
+
     return () => {
       isMountedRef.current = false;
     };
@@ -56,27 +57,27 @@ export default function SystemAdminLoginPage() {
     if (!isMountedRef.current) return;
 
     setIsLoading(true);
-    console.log('SystemAdminLogin: Starting admin login for:', data.email);
-    
+    logger.log('SystemAdminLogin: Starting admin login');
+
     try {
-      console.log('SystemAdminLogin: Calling login function...');
+      logger.log('SystemAdminLogin: Calling login function...');
       await login(data.email, data.password);
-      
+
       // Wait a bit for auth state to update
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      console.log('SystemAdminLogin: Login successful, checking admin status');
-      
+
+      logger.log('SystemAdminLogin: Login successful, checking admin status');
+
       // The login function will update the user context
       // We need to check if the logged-in user is actually an admin
       // This will be handled by the useEffect above
-      
+
     } catch (error: unknown) {
       if (!isMountedRef.current) return;
-      
+
       console.error('SystemAdminLogin: Login error:', error);
       const errorMessage = getErrorMessage(error, 'Failed to log in');
-      
+
       if (errorMessage.includes('Invalid login credentials')) {
         toast.error('Invalid email or password');
       } else if (errorMessage.includes('Email not confirmed')) {
