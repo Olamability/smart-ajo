@@ -119,6 +119,12 @@ export interface Payout {
   cycleNumber: number;
   amount: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
+  /** Admin-approval workflow state (pending → ready → approved → processing → completed → failed) */
+  approvalStatus?: 'pending' | 'ready' | 'approved' | 'processing' | 'completed' | 'failed';
+  /** UUID of the admin who approved the payout */
+  approvedBy?: string;
+  /** Timestamp when the payout was approved by an admin */
+  approvedAt?: string;
   payoutDate?: string;
   paymentMethod?: string;
   paymentReference?: string;
