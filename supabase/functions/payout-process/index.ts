@@ -29,6 +29,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { createMonitor } from '../_shared/monitoring.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -104,6 +105,8 @@ async function processSinglePayout(
     recipient_id: string;
     cycle_number: number;
     amount: number;
+    retry_count: number;
+    max_retries: number;
     users: {
       id: string;
       email: string | null;
@@ -273,23 +276,71 @@ async function processSinglePayout(
       transferError,
     );
 
-    // Revert payout to pending so it can be retried
-    await supabase
-      .from('payouts')
-      .update({
-        status: 'pending',
-        notes: `Transfer error: ${errorMessage}`,
-      })
-      .eq('id', payout.id);
+    // Increment retry counter and decide whether to re-queue or permanently fail
+    const { data: retryResult } = await supabase.rpc('increment_payout_retry', {
+      p_payout_id:      payout.id,
+      p_failure_reason: errorMessage,
+    });
+
+    const canRetry: boolean = retryResult?.can_retry ?? false;
+    const retryCount: number = retryResult?.retry_count ?? payout.retry_count + 1;
+    const maxRetries: number = retryResult?.max_retries ?? payout.max_retries;
+
+    if (canRetry) {
+      // Return payout to pending so the next scheduled run can retry it
+      await supabase
+        .from('payouts')
+        .update({
+          status: 'pending',
+          notes: `Transfer error (attempt ${retryCount}/${maxRetries}): ${errorMessage}`,
+        })
+        .eq('id', payout.id);
+
+      console.warn(
+        `[payout-process] Payout ${payout.id} failed (attempt ${retryCount}/${maxRetries}); re-queued for retry.`,
+      );
+    } else {
+      // Exceeded max retries — permanently mark as failed
+      await supabase
+        .from('payouts')
+        .update({
+          status: 'failed',
+          notes: `Permanently failed after ${retryCount} attempts. Last error: ${errorMessage}`,
+        })
+        .eq('id', payout.id);
+
+      // Notify recipient that payout permanently failed
+      await supabase.rpc('send_payment_notification', {
+        p_user_id: user.id,
+        p_type: 'payout_processed',
+        p_title: 'Payout permanently failed',
+        p_message:
+          `Your payout for cycle ${payout.cycle_number} could not be processed after ` +
+          `${retryCount} attempts. Please contact support.`,
+        p_metadata: {
+          payout_id: payout.id,
+          cycle_number: payout.cycle_number,
+          group_id: payout.related_group_id,
+          retry_count: retryCount,
+        },
+      });
+
+      console.error(
+        `[payout-process] Payout ${payout.id} permanently failed after ${retryCount}/${maxRetries} attempts.`,
+      );
+    }
 
     await logAuditEvent(supabase, 'payout_transfer_error', 'payout', payout.id, {
       recipient_id: user.id,
       group_id: payout.related_group_id,
       cycle_number: payout.cycle_number,
       error: errorMessage,
+      retry_count: retryCount,
+      max_retries: maxRetries,
+      can_retry: canRetry,
     }, user.id);
 
-    return { payoutId: payout.id, status: 'error', error: errorMessage };
+    return { payoutId: payout.id, status: canRetry ? 'error' : 'failed', error: errorMessage };
   }
 }
 
@@ -301,6 +352,8 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+
+  const mon = createMonitor('payout-process');
 
   try {
     const paystackSecretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
@@ -329,13 +382,17 @@ serve(async (req) => {
       // Empty or non-JSON body is fine — process all pending payouts
     }
 
-    // Build query for pending payouts, joining user bank account details
+    // Build query for pending payouts, joining user bank account details.
+    // Exclude payouts that have already reached their retry limit to avoid
+    // attempting transfers that are permanently failed but not yet transitioned.
     type PendingPayout = {
       id: string;
       related_group_id: string;
       recipient_id: string;
       cycle_number: number;
       amount: number;
+      retry_count: number;
+      max_retries: number;
       users: {
         id: string;
         email: string | null;
@@ -355,6 +412,8 @@ serve(async (req) => {
          recipient_id,
          cycle_number,
          amount,
+         retry_count,
+         max_retries,
          users!recipient_id (
            id,
            email,
@@ -380,7 +439,13 @@ serve(async (req) => {
       throw new Error('Failed to fetch pending payouts');
     }
 
-    if (!pendingPayouts || pendingPayouts.length === 0) {
+    // Filter in application code: skip payouts that have exhausted their retry limit.
+    // (PostgREST cannot compare two columns directly in a filter expression.)
+    const eligiblePayouts = (pendingPayouts ?? []).filter(
+      (p) => (p as PendingPayout).retry_count < (p as PendingPayout).max_retries,
+    ) as PendingPayout[];
+
+    if (eligiblePayouts.length === 0) {
       console.log('[payout-process] No pending payouts found');
       return new Response(
         JSON.stringify({ success: true, processed: 0, initiated: 0, failed: 0, message: 'No pending payouts' }),
@@ -388,11 +453,11 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[payout-process] Processing ${pendingPayouts.length} pending payout(s)`);
+    console.log(`[payout-process] Processing ${eligiblePayouts.length} pending payout(s)`);
 
     const results: Array<{ payoutId: string; status: string; error?: string }> = [];
 
-    for (const payout of pendingPayouts as PendingPayout[]) {
+    for (const payout of eligiblePayouts) {
       const result = await processSinglePayout(supabase, paystackSecretKey, payout);
       results.push(result);
     }
@@ -417,7 +482,7 @@ serve(async (req) => {
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (error) {
-    console.error('[payout-process] Unexpected error:', error);
+    await mon.error('Unexpected error in payout-process handler', error);
     return new Response(
       JSON.stringify({
         success: false,

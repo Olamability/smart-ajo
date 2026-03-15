@@ -20,6 +20,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { createHmac } from 'https://deno.land/std@0.168.0/node/crypto.ts';
+import { createMonitor } from '../_shared/monitoring.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -367,6 +368,8 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const mon = createMonitor('paystack-webhook');
+
   try {
     // Get Paystack secret key from environment
     const paystackSecretKey = Deno.env.get('PAYSTACK_SECRET_KEY');
@@ -478,6 +481,26 @@ serve(async (req) => {
             const errMsg = completeError?.message ?? completeResult?.error ?? 'Failed to complete payout transfer';
             console.error(`[paystack-webhook] complete_payout_transfer failed for payout ${payoutRecord.id}:`, errMsg);
           } else {
+            // Release funds from the group escrow pool (Group Escrow Pool → Recipient Wallet)
+            const { data: escrowReleaseResult, error: escrowReleaseError } = await supabase.rpc(
+              'release_escrow_for_payout',
+              {
+                p_group_id:     payoutRecord.related_group_id,
+                p_cycle_number: payoutRecord.cycle_number,
+                p_amount:       (event.data as unknown as PaystackTransferWebhookData).amount / 100,
+              }
+            );
+
+            if (escrowReleaseError || !escrowReleaseResult?.success) {
+              // Non-fatal: log but do not fail the webhook response
+              console.error(
+                `[paystack-webhook] release_escrow_for_payout failed (non-fatal) for payout ${payoutRecord.id}:`,
+                escrowReleaseError?.message ?? escrowReleaseResult?.error,
+              );
+            } else {
+              console.log(`[paystack-webhook] Escrow pool released for payout ${payoutRecord.id}`);
+            }
+
             // Notify the recipient that their payout has been sent
             await supabase.rpc('send_payment_notification', {
               p_user_id: payoutRecord.recipient_id,
@@ -522,12 +545,22 @@ serve(async (req) => {
           .single();
 
         if (failedPayout) {
-          // Revert payout status to pending for retry
+          // Increment retry counter and decide whether to re-queue or permanently fail
+          const { data: retryResult } = await supabase.rpc('increment_payout_retry', {
+            p_payout_id:      failedPayout.id,
+            p_failure_reason: failureReason,
+          });
+
+          const canRetry: boolean = retryResult?.can_retry ?? true;
+
+          // Revert payout status based on retry eligibility
           await supabase
             .from('payouts')
             .update({
-              status: 'pending',
-              notes: `Transfer failed: ${failureReason}`,
+              status: canRetry ? 'pending' : 'failed',
+              notes: canRetry
+                ? `Transfer failed (attempt ${retryResult?.retry_count ?? '?'}/${retryResult?.max_retries ?? '?'}): ${failureReason}`
+                : `Permanently failed after ${retryResult?.retry_count ?? '?'} attempts: ${failureReason}`,
               payment_reference: null,
             })
             .eq('id', failedPayout.id);
@@ -583,7 +616,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error processing webhook:', error);
+    await mon.error('Unexpected error in paystack-webhook handler', error);
     return new Response(
       JSON.stringify({
         success: false,

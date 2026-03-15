@@ -18,6 +18,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { createMonitor } from '../_shared/monitoring.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -63,6 +64,8 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+
+  const mon = createMonitor('verify-contribution');
 
   try {
     console.log('Contribution verification request received');
@@ -244,13 +247,41 @@ serve(async (req) => {
       });
     }
 
-    // Step 3d: Check if all cycle contributions are paid and prepare payout
+    // Step 3d: Fetch the contribution's cycle number once; reuse for escrow + payout check.
     const { data: contributionData } = await supabase
       .from('contributions')
       .select('cycle_number')
       .eq('id', contributionId)
       .single();
 
+    // Step 3d-i: Credit the group escrow pool for this cycle.
+    // The escrow pool accumulates all contribution funds before they are
+    // disbursed to the cycle recipient (User Wallet → Group Escrow Pool).
+    if (contributionData) {
+      const { data: escrowResult, error: escrowError } = await supabase.rpc(
+        'credit_escrow_pool',
+        {
+          p_group_id:     groupId,
+          p_cycle_number: contributionData.cycle_number,
+          p_amount:       contributionAmountNaira,
+        }
+      );
+
+      if (escrowError || !escrowResult?.success) {
+        // Non-fatal: contribution is already recorded atomically; log and continue.
+        console.error(
+          '[verify-contribution] credit_escrow_pool failed (non-fatal):',
+          escrowError?.message ?? escrowResult?.error,
+        );
+      } else {
+        console.log(
+          `[verify-contribution] Escrow pool credited — group ${groupId} cycle ${contributionData.cycle_number}:`,
+          { collected: escrowResult.collected_amount, target: escrowResult.target_amount, status: escrowResult.status },
+        );
+      }
+    }
+
+    // Step 3d-ii: Check if all cycle contributions are paid and prepare payout
     if (contributionData) {
       const cycleNumber = contributionData.cycle_number;
       console.log(`[verify-contribution] Checking cycle ${cycleNumber} readiness for group ${groupId}`);
@@ -325,7 +356,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error in contribution verification:', error);
+    await mon.error('Unexpected error in verify-contribution handler', error);
     return new Response(
       JSON.stringify({
         success: false,
