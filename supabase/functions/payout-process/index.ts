@@ -6,9 +6,14 @@
  * recipients' bank accounts.
  *
  * Invocation scenarios:
- * 1. Called by paystack-webhook after check_cycle_and_prepare_payout creates a payout record
+ * 1. Triggered by an admin after approving a payout via approve_payout() RPC
  * 2. Triggered manually by an admin for retry/recovery
  * 3. Called by a scheduled job (Supabase cron / external scheduler)
+ *
+ * NOTE: Only payouts with approval_status = 'approved' are eligible for
+ * processing.  Payouts with approval_status = 'ready' must first be approved
+ * by an admin (via the approve_payout RPC or the admin dashboard) before
+ * this function will pick them up.
  *
  * Request body (all fields optional):
  * {
@@ -404,6 +409,9 @@ serve(async (req) => {
       } | null;
     };
 
+    // Only process payouts that have been explicitly approved by an admin.
+    // Payouts with approval_status = 'ready' are waiting for admin approval
+    // and must not be dispatched automatically.
     let query = supabase
       .from('payouts')
       .select(
@@ -424,7 +432,8 @@ serve(async (req) => {
            bank_name
          )`,
       )
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .eq('approval_status', 'approved');
 
     if (payoutId) {
       query = query.eq('id', payoutId);
