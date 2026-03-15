@@ -90,7 +90,7 @@ async function createUserProfileViaRPC(
         p_phone: phone,
         p_full_name: fullName,
       });
-      
+
       // Check for transient errors that should be retried
       if (response.error) {
         if (isTransientError(response.error)) {
@@ -101,7 +101,7 @@ async function createUserProfileViaRPC(
         error.stopRetry = true;
         throw error;
       }
-      
+
       return response;
     },
     3,  // Max 3 attempts
@@ -126,15 +126,15 @@ async function checkUserExists(email: string, phone: string): Promise<{
   console.log('checkUserExists: Checking for existing user with email/phone');
 
   const { data, error } = await supabase.rpc('check_user_exists', {
-    p_email: email,
-    p_phone: phone,
+    p_email: email.trim().toLowerCase(),
+    p_phone: phone.trim(),
   });
 
   if (error) {
     console.error('checkUserExists: Error checking user existence:', error);
     const errorCode = (error as { code?: string }).code || '';
     const errorMessage = error.message || '';
-    
+
     // Check for critical network/connection errors that should fail signup
     const isCriticalError =
       errorCode === 'PGRST301' ||
@@ -160,9 +160,9 @@ async function checkUserExists(email: string, phone: string): Promise<{
   console.log('checkUserExists: Result:', result);
 
   return {
-    emailExists: result?.email_exists || false,
-    phoneExists: result?.phone_exists || false,
-    userId: result?.user_id || null,
+    emailExists: result?.email_exists || result?.emailExists || false,
+    phoneExists: result?.phone_exists || result?.phoneExists || false,
+    userId: result?.user_id || result?.userId || null,
   };
 }
 
@@ -178,7 +178,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [user]);
 
   const loadUserProfile = async (
-    userId: string, 
+    userId: string,
     force: boolean = false,
     existingSession?: Session | null
   ): Promise<boolean> => {
@@ -188,10 +188,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       isLoadingProfileRef.current = true;
       console.log(`loadUserProfile: Loading profile for user: ${userId}${force ? ' (forced)' : ''}${existingSession ? ' (using provided session)' : ''}`);
-      
+
       // Validate session (either provided or fetched)
       let session: Session | null = null;
-      
+
       // If we have an existing session passed in, use it directly (e.g., from login)
       // This avoids race conditions where getSession() might not immediately reflect the new session
       if (existingSession) {
@@ -205,7 +205,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Retry session check with backoff - session might be restoring after redirect
         for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-          
+
           if (sessionError) {
             console.error('loadUserProfile: Session error:', sessionError);
             // If there's a session error, wait and retry
@@ -217,12 +217,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
             throw new Error('Unable to verify session. Please try logging in again.');
           }
-          
+
           if (sessionData.session) {
             session = sessionData.session;
             break;
           }
-          
+
           // No session yet, wait and retry
           if (sessionAttempts < 4) {
             const delay = calculateBackoffDelay(sessionAttempts);
@@ -232,11 +232,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             throw new Error('Session expired or not found. Please log in again.');
           }
         }
-        
+
         if (!session) {
           throw new Error('Session expired or not found. Please log in again.');
         }
-        
+
         if (session.user.id !== userId) {
           throw new Error('Session user mismatch');
         }
@@ -299,13 +299,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUser = async (): Promise<boolean> => {
     try {
       console.log('refreshUser: Starting user refresh');
-      
+
       // Retry session check with backoff to handle post-redirect session restoration
       let session = null;
-      
+
       for (let sessionAttempts = 0; sessionAttempts < 5; sessionAttempts++) {
         const { data, error } = await supabase.auth.getSession();
-        
+
         if (error) {
           console.error('refreshUser: Session error:', error);
           if (sessionAttempts < 4) {
@@ -317,12 +317,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setUser(null);
           return false;
         }
-        
+
         if (data.session) {
           session = data.session;
           break;
         }
-        
+
         // No session yet, wait and retry
         if (sessionAttempts < 4) {
           const delay = calculateBackoffDelay(sessionAttempts);
@@ -334,7 +334,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return false;
         }
       }
-      
+
       if (!session?.user) {
         console.log('refreshUser: No active session found');
         setUser(null);
@@ -384,7 +384,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       console.log('login: Auth successful, loading user profile...');
-      
+
       // ✅ Pass the session from signInWithPassword directly to avoid race condition
       // This prevents loadUserProfile from calling getSession() which may not be ready yet
       try {
@@ -392,7 +392,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.log('login: Profile loaded successfully, login complete');
       } catch (profileError) {
         console.error('login: Failed to load profile, attempting to create:', profileError);
-        
+
         // If profile doesn't exist, try to create it
         // This handles users who signed up but didn't complete email confirmation
         try {
@@ -454,12 +454,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       if (error || !data.user) {
-        console.error('Signup auth error:', error?.message);
+        console.error('signUp: Auth error:', error?.message);
+
         if (error && isRateLimitError(error)) {
-          // Surface rate-limit errors immediately – never retry them
           throw error;
         }
-        if (error?.message?.includes('User already registered')) throw new Error('This email is already registered. Please sign in instead.');
+
+        // Handle the case where user is in auth.users but not in public.users
+        if (error?.message?.includes('User already registered') || error?.message?.includes('already exists')) {
+          console.log('signUp: User already exists in Auth, checking if profile exists...');
+
+          // Re-verify existence in public.users
+          const verifyProfile = await checkUserExists(trimmedEmail, trimmedPhone);
+
+          if (verifyProfile.emailExists || verifyProfile.phoneExists) {
+            throw new Error('An account with this email or phone number already exists. Please sign in instead.');
+          }
+
+          // If they exist in Auth but NOT in public.users, we can't easily "fix" it here 
+          // because we don't have their ID without them being logged in.
+          // However, we can tell them to try signing in, which will trigger the 
+          // profile creation logic in the login function.
+          throw new Error('This email is already registered. Please try to sign in. If you forgot your password, please use the reset link.');
+        }
+
         throw error || new Error('Signup failed: No user data returned');
       }
 
@@ -474,7 +492,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // ✅ NEW APPROACH: Don't create profile during signup
       // Profile creation will happen during first login after email confirmation
       // This prevents issues with unconfirmed accounts and simplifies the flow
-      
+
       if (needsEmailConfirmation) {
         console.log('signUp: Email confirmation required, deferring profile creation');
         // Throw a custom error class for type-safe error handling
@@ -487,7 +505,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await createUserProfileViaRPC(data.user);
         console.log('signUp: User profile created successfully');
         await new Promise(resolve => setTimeout(resolve, PROFILE_CREATION_DELAY_MS));
-        
+
         // Load profile with the session from signup
         if (data.session) {
           await loadUserProfile(data.user.id, true, data.session);
