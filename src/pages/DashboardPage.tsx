@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getUserStats, getUserGroups, getUserTransactions } from '@/api';
+import { getUserStats, getUserGroups, getUserTransactions, getUserContributionSummary } from '@/api';
 import type { UserStats } from '@/api/stats';
+import type { GroupContributionSummary } from '@/api/contributions';
 import type { Group, Transaction } from '@/types';
 import NotificationCenter from '@/components/NotificationCenter';
 import AvailableGroupsSection from '@/components/AvailableGroupsSection';
 import WalletCard from '@/components/WalletCard';
+import ContributionSummaryCard from '@/components/ContributionSummaryCard';
 import DashboardLayout, { type DashboardSection } from '@/components/DashboardLayout';
 import { useNotifications } from '@/hooks/useNotifications';
 import { Button } from '@/components/ui/button';
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [recentGroups, setRecentGroups] = useState<Group[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [contributionSummaries, setContributionSummaries] = useState<GroupContributionSummary[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const { unreadCount } = useNotifications();
 
@@ -71,6 +74,11 @@ export default function DashboardPage() {
       const transactionsResult = await getUserTransactions();
       if (transactionsResult.success && transactionsResult.transactions) {
         setRecentTransactions(transactionsResult.transactions.slice(0, 5));
+      }
+
+      const summaryResult = await getUserContributionSummary();
+      if (summaryResult.success && summaryResult.summaries) {
+        setContributionSummaries(summaryResult.summaries);
       }
     } catch (error) {
       console.error('Error loading dashboard:', error);
@@ -352,6 +360,18 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Contribution Summary */}
+          {contributionSummaries.length > 0 && (
+            <div>
+              <h2 className="text-base font-semibold mb-3">Payment Summary by Group</h2>
+              <div className="space-y-3">
+                {contributionSummaries.map((summary) => (
+                  <ContributionSummaryCard key={summary.groupId} summary={summary} />
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

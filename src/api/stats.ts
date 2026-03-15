@@ -56,12 +56,12 @@ export const getUserStats = async (): Promise<{
     // Get contributions stats
     const { data: contributionsData } = await supabase
       .from('contributions')
-      .select('status, amount, due_date')
+      .select('status, amount, due_date, is_overdue')
       .eq('user_id', user.id);
 
     const totalContributions = contributionsData?.filter(c => c.status === 'paid').length || 0;
-    const pendingContributions = contributionsData?.filter(c => c.status === 'pending' && new Date(c.due_date) >= new Date()).length || 0;
-    const overdueContributions = contributionsData?.filter(c => c.status === 'pending' && new Date(c.due_date) < new Date()).length || 0;
+    const pendingContributions = contributionsData?.filter(c => c.status === 'pending' && !c.is_overdue).length || 0;
+    const overdueContributions = contributionsData?.filter(c => c.status === 'overdue' || (c.status === 'pending' && c.is_overdue)).length || 0;
 
     // Get payouts stats
     const { data: payoutsData } = await supabase
