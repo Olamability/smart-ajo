@@ -42,19 +42,12 @@ export function EmptyState({
       {(actionLabel || secondaryActionLabel) && (
         <div className="flex flex-col sm:flex-row gap-3">
           {actionLabel && onAction && (
-            <Button
-              onClick={onAction}
-              className="transition-all duration-150 active:scale-95 hover:shadow-md hover:-translate-y-0.5"
-            >
+            <Button onClick={onAction}>
               {actionLabel}
             </Button>
           )}
           {secondaryActionLabel && onSecondaryAction && (
-            <Button
-              variant="outline"
-              onClick={onSecondaryAction}
-              className="transition-all duration-150 active:scale-95 hover:shadow-md hover:-translate-y-0.5"
-            >
+            <Button variant="outline" onClick={onSecondaryAction}>
               {secondaryActionLabel}
             </Button>
           )}

@@ -16,8 +16,6 @@ const AnimatedButton = forwardRef<HTMLButtonElement, AnimatedButtonProps>(
       <Button
         ref={ref}
         className={cn(
-          'transition-all duration-150 ease-out',
-          'active:scale-95',
           'hover:shadow-md hover:-translate-y-0.5',
           successState && 'bg-green-600 hover:bg-green-700 animate-pulse-soft',
           errorState && 'bg-destructive animate-shake',
