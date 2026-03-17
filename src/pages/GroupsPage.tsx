@@ -12,7 +12,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { Shield, Plus, Users, DollarSign, Calendar, Loader2, CreditCard, AlertCircle } from 'lucide-react';
+import { LoadingGrid } from '@/components/LoadingList';
+import { EmptyState } from '@/components/EmptyState';
+import { PageTransition } from '@/components/PageTransition';
+import { Shield, Plus, Users, DollarSign, Calendar, CreditCard, AlertCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 
@@ -102,13 +105,25 @@ export default function GroupsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 p-4 sm:p-6 lg:p-8">
+        <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-lg bg-muted animate-pulse flex-shrink-0" />
+              <div className="space-y-2">
+                <div className="h-6 w-32 bg-muted animate-pulse rounded" />
+                <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+              </div>
+            </div>
+          </div>
+          <LoadingGrid count={4} />
+        </div>
       </div>
     );
   }
 
   return (
+    <PageTransition>
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 p-4 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
@@ -184,16 +199,14 @@ export default function GroupsPage() {
         {/* Groups List */}
         {groups.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16 px-4">
-              <Users className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mb-4" />
-              <h3 className="text-base sm:text-lg font-semibold mb-2">No Groups Yet</h3>
-              <p className="text-xs sm:text-sm text-muted-foreground text-center mb-4 max-w-sm">
-                Create or join a group to start saving together
-              </p>
-              <Button onClick={() => navigate('/groups/create')} className="gap-2 w-full sm:w-auto">
-                <Plus className="w-4 h-4" />
-                Create Your First Group
-              </Button>
+            <CardContent className="p-0">
+              <EmptyState
+                icon={<Users className="w-8 h-8" />}
+                title="No Groups Yet"
+                description="Create or join a savings group to start your Ajo journey with friends and family."
+                actionLabel="Create Your First Group"
+                onAction={() => navigate('/groups/create')}
+              />
             </CardContent>
           </Card>
         ) : (
@@ -201,7 +214,7 @@ export default function GroupsPage() {
             {groups.map((group) => (
               <Card
                 key={group.id}
-                className="hover:shadow-lg transition-shadow cursor-pointer"
+                className="hover:shadow-lg transition-all duration-200 cursor-pointer card-hover"
                 onClick={() => navigate(`/groups/${group.id}`)}
               >
                 <CardHeader>
@@ -295,5 +308,6 @@ export default function GroupsPage() {
         </div>
       </div>
     </div>
+    </PageTransition>
   );
 }

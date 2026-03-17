@@ -162,7 +162,7 @@ export function usePayment(): UsePaymentReturn {
                 logger.log('[usePayment] Inline verification succeeded');
               }
             })
-            .catch((err: unknown) => {
+            .catch((_err: unknown) => {
               logger.warn('[usePayment] Inline verification non-critical issue');
             });
 

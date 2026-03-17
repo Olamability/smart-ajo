@@ -4,7 +4,11 @@ import { getUserTransactions } from '../api/transactions';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { Download, Loader2, DollarSign, TrendingUp, AlertCircle } from 'lucide-react';
+import { Skeleton } from '../components/ui/skeleton';
+import { LoadingList } from '../components/LoadingList';
+import { EmptyState } from '../components/EmptyState';
+import { PageTransition } from '../components/PageTransition';
+import { Download, DollarSign, TrendingUp, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { exportTransactionsToPDF } from '../lib/pdfExport';
@@ -131,11 +135,34 @@ export default function TransactionsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-          <p className="mt-4 text-muted-foreground">Loading transactions...</p>
+      <div className="container mx-auto px-4 py-8 max-w-6xl animate-fade-in">
+        <div className="mb-8">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="space-y-2">
+              <Skeleton className="h-8 w-56" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+            <Skeleton className="h-10 w-32" />
+          </div>
         </div>
+        <div className="flex flex-wrap gap-2 mb-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-24 rounded-md" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-28" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-24" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <LoadingList count={8} />
       </div>
     );
   }
@@ -143,6 +170,7 @@ export default function TransactionsPage() {
   const filteredTransactions = filterTransactions();
 
   return (
+    <PageTransition>
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       <div className="mb-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -247,10 +275,13 @@ export default function TransactionsPage() {
         </CardHeader>
         <CardContent>
           {filteredTransactions.length === 0 ? (
-            <div className="text-center py-12">
-              <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">No transactions found</p>
-            </div>
+            <EmptyState
+              icon={<AlertCircle className="w-8 h-8" />}
+              title="No transactions found"
+              description={filter === 'all' ? 'Your transactions will appear here once you start contributing.' : `No ${filter.replace('_', ' ')} transactions found.`}
+              actionLabel={filter !== 'all' ? 'Show All' : undefined}
+              onAction={filter !== 'all' ? () => setFilter('all') : undefined}
+            />
           ) : (
             <div className="space-y-4">
               {filteredTransactions.map((transaction) => (
@@ -296,5 +327,6 @@ export default function TransactionsPage() {
         </CardContent>
       </Card>
     </div>
+    </PageTransition>
   );
 }
