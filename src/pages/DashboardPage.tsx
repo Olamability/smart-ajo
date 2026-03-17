@@ -18,8 +18,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { StatsSkeletonCard } from '@/components/SkeletonCard';
+import { LoadingList, LoadingGrid } from '@/components/LoadingList';
+import { EmptyState } from '@/components/EmptyState';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
-  Loader2,
   Users,
   DollarSign,
   TrendingUp,
@@ -120,8 +123,29 @@ export default function DashboardPage() {
 
   if (loading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-6 p-8">
+        <div className="w-full max-w-5xl space-y-6">
+          <Skeleton className="h-8 w-56" />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <StatsSkeletonCard key={i} />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-32" />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 rounded-lg" />
+              ))}
+            </div>
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-40" />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-14 rounded-lg" />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -140,8 +164,21 @@ export default function DashboardPage() {
       </div>
 
       {loadingData ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="space-y-4 animate-fade-in">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <StatsSkeletonCard key={i} />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 rounded-md" />
+            ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <LoadingList count={3} />
+            <LoadingList count={3} />
+          </div>
         </div>
       ) : (
         <>
@@ -176,7 +213,7 @@ export default function DashboardPage() {
 
           {/* Stats Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="hover:shadow-md transition-shadow">
+            <Card className="hover:shadow-md transition-all duration-200 card-hover">
               <CardContent className="pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -191,7 +228,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card className="hover:shadow-md transition-all duration-200 card-hover">
               <CardContent className="pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -208,7 +245,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card className="hover:shadow-md transition-all duration-200 card-hover">
               <CardContent className="pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -225,7 +262,7 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card className="hover:shadow-md transition-all duration-200 card-hover">
               <CardContent className="pt-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -410,26 +447,19 @@ export default function DashboardPage() {
       </div>
 
       {loadingData ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <LoadingGrid count={3} />
       ) : recentGroups.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center">
-            <Users className="w-14 h-14 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No groups yet</h3>
-            <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
-              Create your first savings group or join an existing one to get started.
-            </p>
-            <div className="flex gap-3 justify-center flex-wrap">
-              <Button onClick={() => navigate('/groups/create')} className="gap-2">
-                <Plus className="w-4 h-4" />
-                Create Group
-              </Button>
-              <Button variant="outline" onClick={() => setActiveSection('discover')}>
-                Discover Groups
-              </Button>
-            </div>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={<Users className="w-8 h-8" />}
+              title="No groups yet"
+              description="Create your first savings group or join an existing one to get started."
+              actionLabel="Create Group"
+              onAction={() => navigate('/groups/create')}
+              secondaryActionLabel="Discover Groups"
+              onSecondaryAction={() => setActiveSection('discover')}
+            />
           </CardContent>
         </Card>
       ) : (
@@ -493,17 +523,17 @@ export default function DashboardPage() {
       </div>
 
       {loadingData ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
+        <LoadingList count={5} />
       ) : recentTransactions.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center">
-            <Clock className="w-14 h-14 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No transactions yet</h3>
-            <p className="text-muted-foreground">
-              Your transactions will appear here once you start contributing.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={<Clock className="w-8 h-8" />}
+              title="No transactions yet"
+              description="Your transactions will appear here once you start contributing to a group."
+              actionLabel="View Groups"
+              onAction={() => setActiveSection('groups')}
+            />
           </CardContent>
         </Card>
       ) : (

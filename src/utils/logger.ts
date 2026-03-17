@@ -6,28 +6,28 @@
 const isDev = import.meta.env.DEV;
 
 export const logger = {
-    log: (message: string, ...args: any[]) => {
+    log: (message: string, ...args: unknown[]) => {
         if (isDev) {
             console.log(`[APP] ${message}`, ...args);
         }
     },
-    debug: (message: string, ...args: any[]) => {
+    debug: (message: string, ...args: unknown[]) => {
         if (isDev) {
             console.debug(`[DEBUG] ${message}`, ...args);
         }
     },
-    info: (message: string, ...args: any[]) => {
+    info: (message: string, ...args: unknown[]) => {
         if (isDev) {
             console.info(`[INFO] ${message}`, ...args);
         }
     },
-    warn: (message: string, ...args: any[]) => {
+    warn: (message: string, ...args: unknown[]) => {
         if (isDev) {
             console.warn(`[WARN] ${message}`, ...args);
         }
     },
     // Ensure console.error remains available
-    error: (message: string, ...args: any[]) => {
+    error: (message: string, ...args: unknown[]) => {
         console.error(`[ERROR] ${message}`, ...args);
     }
 };
