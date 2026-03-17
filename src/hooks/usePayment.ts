@@ -7,6 +7,13 @@
  * Unauthorized errors that occurred when fresh client instances hadn't yet
  * loaded the session from cookies before invoking Edge Functions.
  *
+ * Auth approach: we call supabase.auth.getUser() (a server-side validation)
+ * to confirm the session is current before payment, then let the Supabase
+ * client attach the Authorization header automatically in functions.invoke().
+ * Manually extracting getSession().access_token and passing it as a header
+ * was the original source of 401 errors: getSession() can return a cached
+ * (expired) token that overrides the client's auto-refreshed header.
+ *
  * Usage:
  *   const { initiatePayment, isProcessing } = usePayment();
  *   await initiatePayment({ type: 'group_creation', groupId, amount, slotNumber });
@@ -66,22 +73,24 @@ export function usePayment(): UsePaymentReturn {
     try {
       const supabase = createClient();
 
-      // Obtain the current user's access token from the shared singleton
-      // session. Because AuthContext keeps this singleton alive and manages
-      // token refresh, getSession() returns the in-memory value immediately
-      // without an extra network round-trip.
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      // Validate the current session via the auth server (server-side check).
+      // getUser() is preferred over getSession() here: getSession() returns
+      // the cached (potentially stale) access token, which – when forwarded
+      // manually as an Authorization header – can override the Supabase
+      // client's auto-refreshed header and trigger a 401 from the Edge
+      // Function's JWT verification.  getUser() performs a live validation so
+      // we know the session is genuine before we start the payment flow.
+      const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
 
-      if (sessionError || !accessToken) {
+      if (userError || !currentUser) {
         toast.error('Session expired. Please log in again.');
         setIsProcessing(false);
         return;
       }
 
-      const authHeaders = { Authorization: `Bearer ${accessToken}` };
-
       // Step 1: Create pending transaction via initialize-payment
+      // No manual Authorization header is passed; the singleton Supabase
+      // client attaches the fresh session token automatically inside invoke().
       const initBody =
         params.type === 'contribution'
           ? {
@@ -102,7 +111,7 @@ export function usePayment(): UsePaymentReturn {
 
       const { data: initData, error: initError } = await supabase.functions.invoke(
         'initialize-payment',
-        { body: initBody, headers: authHeaders }
+        { body: initBody }
       );
 
       if (initError || !initData?.reference) {
@@ -152,7 +161,7 @@ export function usePayment(): UsePaymentReturn {
           const verifyFn =
             params.type === 'contribution' ? 'verify-contribution' : 'verify-payment';
           supabase.functions
-            .invoke(verifyFn, { body: { reference: resolvedRef }, headers: authHeaders })
+            .invoke(verifyFn, { body: { reference: resolvedRef } })
             .then(({ data, error: fnErr }) => {
               if (fnErr || !data?.success) {
                 logger.warn(
