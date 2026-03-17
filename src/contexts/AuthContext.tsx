@@ -168,6 +168,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const isLoadingProfileRef = useRef(false);
   const userRef = useRef<User | null>(null);
+  // Tracks whether login() is actively in progress so the onAuthStateChange
+  // SIGNED_IN handler does not race with it (or prematurely sign the user out).
+  const isLoginInProgressRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
@@ -365,6 +368,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const login = async (email: string, password: string) => {
+    // Mark login as in-progress BEFORE calling signInWithPassword.
+    // supabase.auth.signInWithPassword() internally awaits all onAuthStateChange
+    // callbacks via _notifyAllSubscribers before resolving.  Without this flag the
+    // SIGNED_IN callback would race with login()'s own profile-loading logic and,
+    // in the failure path, would call signOut() while the callback is still
+    // executing – blocking signInWithPassword from ever returning and leaving the
+    // UI stuck on "Signing in..." indefinitely.
+    isLoginInProgressRef.current = true;
     try {
       logger.log('login: Starting login');
 
@@ -409,6 +420,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error('login: Login failed:', error);
       reportError(error, { operation: 'login', email: email });
       throw error;
+    } finally {
+      isLoginInProgressRef.current = false;
     }
   };
 
@@ -585,7 +598,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
       }
 
-      if (event === 'SIGNED_IN' && session?.user) {
+      // Skip profile loading when login() is already managing the auth flow.
+      // supabase.auth.signInWithPassword() awaits this callback before returning,
+      // so any async work here (including a signOut call) would block login() and
+      // could leave the UI stuck on "Signing in..." indefinitely.
+      if (event === 'SIGNED_IN' && session?.user && !isLoginInProgressRef.current) {
         try {
           await loadUserProfile(session.user.id);
         } catch (_error) {
@@ -595,7 +612,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             await loadUserProfile(session.user.id, true);
           } catch (createError) {
             console.error('Failed to create profile on auth state change:', createError);
-            await supabase.auth.signOut();
+            // Do NOT call signOut() here: this handler is invoked synchronously
+            // inside _notifyAllSubscribers which signInWithPassword awaits, so a
+            // signOut() call here would clear the session before login() can use
+            // it and may block signInWithPassword from ever resolving.
           }
         }
       }
